@@ -1,0 +1,14 @@
+# ── Built files (python scripts/build_zip.py) ───────────────────────────────
+weather_extractor/vendor/
+dist/
+*.zip
+
+# ── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+
+# ── OS / editor ──────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/

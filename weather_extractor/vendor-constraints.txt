@@ -1,0 +1,3 @@
+# Match the host QGIS runtime; these are not shipped in vendor/.
+numpy==2.4.6
+pandas==3.0.6

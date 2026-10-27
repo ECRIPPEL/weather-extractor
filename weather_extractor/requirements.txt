@@ -1,0 +1,3 @@
+# Supplied by the QGIS runtime: numpy, pandas, shapely, requests, tzdata, and GDAL/osgeo.
+# Additional Python modules are pinned in vendor-requirements.txt and bundled
+# under vendor/ in the Windows ZIP build (QGIS 3.40 or later).

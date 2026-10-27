@@ -1,0 +1,24 @@
+[general]
+name=Weather Extractor
+qgisMinimumVersion=3.40
+description=Extract NOAA/NWS AORC hourly gridded weather, observed USGS, Water Quality Portal, and NOAA GHCN daily and hourly data, and monthly OpenET/MODIS evapotranspiration for an area of interest in the contiguous United States, with CSV tables, GeoPackage station layers, and optional SWAT+ files.
+version=2.1.0
+author=Weather Extractor contributors
+about=Windows bundle for QGIS 3.40 or later. Tab 1 (Area of Interest) defines the area of interest, elevation raster, output folder, target CRS, and timezone shared by all data sources. Tab 2 (Gridded Data) extracts NOAA/NWS AORC weather on the original ~800 m grid, on 5/10/50 km or custom mean grids, at the AOI centroid, or at the cells of the rain gauges found in tab 3, as daily and/or hourly CSV time series, including FAO-56 Penman-Monteith reference ET, with optional SWAT+ climate files. Tab 3 (Observed Data) checks which USGS, Water Quality Portal, and NOAA GHCN data exist in the area (streamflow, gage height, groundwater, daily and hourly precipitation from USGS and NOAA rain gauges, channel geometry, sensor and sample water quality), previews the stations on the map, and downloads the selected datasets. Tab 4 (Remote Sensing Data) retrieves monthly actual evapotranspiration from OpenET and MODIS averaged over the area through Google Earth Engine (requires the Google Earth Engine plugin, signed in, and an Earth Engine Cloud project; Run lists any missing setup step). NOAA data attribution is requested; the plugin is not endorsed by NOAA.
+license=MIT
+category=Vector
+tags=weather,aorc,climate,usgs,streamflow,precipitation,ghcn,water quality,evapotranspiration,openet,modis,earth engine,swat,hydrology
+icon=icon.svg
+experimental=True
+deprecated=False
+changelog=
+  2.1.0 - AORC daily and hourly CSV series in one run, with a separate SWAT+ precipitation time step; AORC at the cells of the rain gauges of the Observed Data tab; hourly NOAA GHCNh precipitation (airports, USCRN, COOP gauges) next to GHCN-Daily; Observed Data column Continuous renamed Sub-daily; timezone moved to tab 1 and shared by tabs 2 and 3; NOAA rain gauge site ids are now GHCN-<station>; AORC read over HTTPS and unused bundled libraries removed (ZIP about 3 MB instead of 21 MB)
+  2.0.0 - Renamed to Weather Extractor; tabbed window (Area of Interest, Gridded Data, Observed Data, Remote Sensing Data): AORC gridded weather with FAO-56 reference ET; USGS, Water Quality Portal, and NOAA GHCN-Daily observed data with availability check, map preview, and audited README; monthly OpenET and MODIS area means
+  1.0.0 - Grid size options (original, 5/10/50 km and custom mean grids, AOI centroid), hourly time step with SWAT+ sub-daily precipitation, climate variable selection, timezone list with GMT offsets, coordinate and target CRS selection, GeoPackage station layers
+  0.5.2 - Write SWAT station files flat with shared variable filename lists and correct .tmp/year headers
+  0.5.1 - Clear completed QGIS task references before the C++ task wrapper is deleted
+  0.5.0 - Add one centroid-nearest AORC grid cell per selected subbasin polygon
+  0.4.0 - Keep progress in the dialog, process years concurrently, remove plots, and load station points into QGIS
+  0.3.0 - Bundle the runtime dependencies and add map-lasso and coordinate-bounds AOIs
+  0.2.1 - Implement the QGIS initGui lifecycle and improve the guided input dialog
+  0.2.0 - Add validated AOI selection, asynchronous extraction, daily summaries, plots, and station-specific SWAT outputs
