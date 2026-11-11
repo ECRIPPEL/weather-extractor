@@ -520,6 +520,18 @@ class ExportTests(unittest.TestCase):
         self.assertIn("Timezone of the hourly GHCNh files: Etc/GMT+6", readme)
         self.assertEqual(result["station_count"], 2)
 
+    def test_parallel_setting_gives_the_same_files(self):
+        selection = [("precipitation_ghcn", "daily"), ("precipitation_ghcn", "continuous"), ("streamflow", "daily")]
+        files = {}
+        for workers in (1, 8):
+            self.output = Path(self.temp.name) / f"parallel {workers}"
+            self.output.mkdir()
+            self.run_export(selection=selection, write_shapefile=False, parallel_workers=workers)
+            base = self.output / "usgs_water_data" / "quantity"
+            files[workers] = {path.relative_to(base).as_posix(): path.read_text() for path in base.rglob("*.csv")}
+        self.assertEqual(files[1], files[8])
+        self.assertIn("hourly/ghcnh_usw00013894_hourly.csv", files[1])
+
     def test_ghcnh_hour_of_each_report(self):
         rows = frame([
             {"DATE": d, "precipitation": v, "precipitation_Report_Type": r}
@@ -548,6 +560,9 @@ class ExportTests(unittest.TestCase):
         base = self.output / "usgs_water_data"
         self.assertEqual(result["station_count"], 1)
         self.assertEqual(result["point_count"], 0)
+        self.assertEqual(result["excluded"], 0)
+        self.inventory.keep(set(result["downloaded"]))
+        self.assertEqual(sorted(self.inventory.sites), ["USGS-A"], "the tab keeps only the downloaded sites")
         self.assertFalse((base / "quality" / "samples.csv").exists())
         self.assertEqual(result["shapefiles"], [])
 

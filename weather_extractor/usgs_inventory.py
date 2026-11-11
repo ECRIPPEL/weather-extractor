@@ -131,6 +131,12 @@ class Inventory:
         ends = [e for _, e in dates if e]
         return (min(begins) if begins else ""), (max(ends) if ends else "")
 
+    def keep(self, keys):
+        """Keep only the datasets in ``keys`` ((site_id, row, column)) and their sites."""
+        self.entries = [e for e in self.entries if (e["site_id"], e["row"], e["column"]) in keys]
+        used = {e["site_id"] for e in self.entries}
+        self.sites = {site_id: site for site_id, site in self.sites.items() if site_id in used}
+
     def to_frame(self, selection=None, sources=(USGS, OTHER)):
         rows = []
         for entry in self.entries:
@@ -466,7 +472,7 @@ def check_availability(settings, geometry, progress=None, is_canceled=None, clie
             "(the USGS Samples area search is too slow); their recent samples are still "
             "downloaded for the listed USGS sites."
         )
-    with ThreadPoolExecutor(max_workers=6) as pool:
+    with ThreadPoolExecutor(max_workers=max(1, int(settings.get("parallel_workers") or 6))) as pool:
         jobs[pool.submit(_series_entries, client, bbox, area, start, end)] = "series"
         jobs[pool.submit(_field_entries, client, bbox, area, start, end)] = "field"
         jobs[pool.submit(_channel_entries, client, bbox, area, start, end)] = "channel"

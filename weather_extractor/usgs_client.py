@@ -1,4 +1,4 @@
-"""HTTP access to the USGS Water Data APIs, USGS Samples, the Water Quality Portal, and NOAA NCEI."""
+"""HTTP access to the USGS Water Data APIs, USGS Samples, the Water Quality Portal, NOAA NCEI, and ANA."""
 
 from io import StringIO
 import threading
@@ -14,7 +14,7 @@ NCEI_SEARCH_URL = "https://www.ncei.noaa.gov/access/services/search/v1/data"
 NCEI_DATA_URL = "https://www.ncei.noaa.gov/access/services/data/v1"
 NCEI_PAGE = 1000
 SIGNUP_URL = "https://api.waterdata.usgs.gov/signup/"
-USER_AGENT = "WeatherExtractor-QGIS/2.1.0"
+USER_AGENT = "WeatherExtractor-QGIS/2.2.0"
 TIMEOUT = (30, 300)  # (connect, read) seconds
 MAX_ATTEMPTS = 5
 MAX_WAIT_SECONDS = 60
@@ -52,10 +52,15 @@ class UsgsClient:
             self.check_canceled()
             self.sleep(min(0.5, max(0.0, deadline - time.monotonic())))
 
-    def request(self, url, params=None, method="GET", timeout=TIMEOUT, attempts=MAX_ATTEMPTS):
+    def request(self, url, params=None, method="GET", timeout=TIMEOUT, attempts=MAX_ATTEMPTS,
+                headers=None, empty_status=()):
+        """The response of a request, retried on network errors and server overload.
+
+        Statuses in ``empty_status`` (e.g. 404 for "no data") return None.
+        """
         import requests
 
-        headers = {}
+        headers = dict(headers or {})
         if self.api_key and url.startswith("https://api.waterdata.usgs.gov"):
             headers["X-Api-Key"] = self.api_key
         last_error = None
@@ -72,6 +77,8 @@ class UsgsClient:
                 continue
             if response.status_code == 200:
                 return response
+            if response.status_code in empty_status:
+                return None
             if response.status_code in RETRY_STATUS:
                 last_error = f"HTTP {response.status_code}"
                 rate_limited = rate_limited or response.status_code == 429
@@ -165,6 +172,10 @@ def _service_name(url):
         return "The Water Quality Portal"
     if url.startswith("https://www.ncei.noaa.gov"):
         return "The NOAA NCEI service"
+    if url.startswith("https://telemetriaws1.ana.gov.br"):
+        return "The ANA web service (ServiceANA)"
+    if url.startswith("https://www.ana.gov.br"):
+        return "The ANA HidroWebService"
     return "The USGS Water Data API"
 
 

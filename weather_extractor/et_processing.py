@@ -319,7 +319,7 @@ def extract_et(settings, aoi_geometry, progress=None, is_canceled=None, ee_modul
         report(5.0 + 90.0 * count / len(jobs), message.format(count, len(jobs)))
         return result
 
-    pool = ThreadPoolExecutor(max_workers=YEAR_WORKERS)
+    pool = ThreadPoolExecutor(max_workers=max(1, int(settings.get("parallel_workers") or YEAR_WORKERS)))
     try:
         results = list(pool.map(run, jobs))
     finally:

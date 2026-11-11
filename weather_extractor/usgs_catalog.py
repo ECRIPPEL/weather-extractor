@@ -1,4 +1,4 @@
-"""Variables offered in the Observed Data tab (USGS, Water Quality Portal, NOAA GHCN)."""
+"""Variables offered in the USGS Data tab (USGS, Water Quality Portal, NOAA GHCN)."""
 
 import re
 

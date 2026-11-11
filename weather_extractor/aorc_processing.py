@@ -197,7 +197,7 @@ def gauge_window(dataset, gauges):
         lon_indices.append(int(np.argmin(np.abs(longitudes - lon))))
     if not kept:
         raise ValueError(
-            "None of the rain gauges selected in the Observed Data tab lies on the AORC grid."
+            "None of the rain gauges selected in the USGS Data tab lies on the AORC grid."
         )
     return GridWindow(lat_indices, lon_indices, longitudes[lon_indices], latitudes[lat_indices]), kept
 
@@ -1121,7 +1121,7 @@ def write_station_locations(stations, output_dir, target_crs=None):
         }
     )
     if gauges:
-        # The rain gauge of each station, as in the Observed Data tables.
+        # The rain gauge of each station, as in the USGS Data tables.
         locations["site_id"] = [station.get("site_id", "") for station in stations]
     locations.to_csv(output_dir / "station_locations.csv", index=False)
 
@@ -1186,7 +1186,7 @@ def describe_grid(settings):
     if settings["grid_mode"] == "gauges":
         return (
             f"rain gauges, the AORC cell nearest to each of the {len(settings.get('gauges') or [])} "
-            "gauges selected in the Observed Data tab"
+            "gauges selected in the USGS Data tab"
         )
     if settings["grid_mode"] == "block":
         return (

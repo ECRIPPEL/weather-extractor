@@ -4,7 +4,7 @@ from pathlib import Path
 import time
 from zoneinfo import ZoneInfo
 
-from qgis.PyQt.QtCore import pyqtSignal
+from qgis.PyQt.QtCore import QTimer, pyqtSignal
 from qgis.PyQt.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -32,6 +32,7 @@ from qgis.core import (
     QgsCoordinateReferenceSystem,
     QgsMapLayer,
     QgsProject,
+    QgsSettings,
     QgsVectorLayer,
     QgsWkbTypes,
 )
@@ -39,6 +40,7 @@ from qgis.gui import QgsProjectionSelectionWidget
 
 from .aorc_map_tool import AORCPolygonTool
 from .et_tab import EtTab
+from .hidroweb_tab import HidrowebTab
 from .usgs_tab import UsgsTab
 
 
@@ -49,19 +51,30 @@ POLYGON_FILE_FILTER = (
 POLYGON_FILE_SUFFIXES = (".shp", ".gpkg", ".geojson", ".json")
 
 
-TAB_AREA, TAB_AORC, TAB_USGS, TAB_ET = range(4)
-TAB_TITLES = ["1. Area of Interest", "2. Gridded Data", "3. Observed Data", "4. Remote Sensing Data"]
+TAB_AREA, TAB_AORC, TAB_USGS, TAB_HIDROWEB, TAB_ET = range(5)
+TAB_TITLES = ["1. Setup", "2. Gridded Data", "3. USGS Data", "4. HidroWeb Data", "5. Remote Sensing"]
 # Shown above the tabs; short enough for two lines, so the window keeps its height.
 TAB_DESCRIPTIONS = [
-    "Define the area of interest, output folder, and timezone first, then choose the data in "
-    "the other tabs. The elevation raster is optional.",
+    "Define the area of interest, output folder, timezone, and parallel processing first, then "
+    "choose the data in the other tabs. The elevation raster is optional.",
     "NOAA AORC gridded weather: hourly, ~800 m, from 1979; daily and hourly series, FAO-56 "
     "reference ET, and SWAT+ files.",
     "Observed data: USGS water quantity and quality, EPA Water Quality Portal samples, and "
     "NOAA GHCN daily and hourly rain gauges.",
+    "ANA HidroWeb (Brazil): daily discharge, water level, and rainfall of the national "
+    "hydrometeorological network.",
     "Remote sensing evapotranspiration: monthly OpenET and MODIS means over the area of interest.",
 ]
 DEFAULT_TIMEZONE = "Etc/GMT+6"
+PARALLEL_KEY = "weather_extractor/parallel_workers"
+# Without any progress for this long, the progress line says the server is not answering.
+STALL_SECONDS = 300
+SERVER_NAMES = {
+    "aorc": "The AORC archive (AWS)",
+    "usgs": "The USGS, EPA, or NOAA service",
+    "hidroweb": "The HidroWeb portal (ANA)",
+    "et": "Google Earth Engine",
+}
 US_STANDARD_TIMES = {
     -5: "US Eastern Standard Time (GMT-5)",
     -6: "US Central Standard Time (GMT-6)",
@@ -109,6 +122,7 @@ def crs_definition(crs):
 class AORCDialog(QDialog):
     extractionRequested = pyqtSignal(object)
     usgsCheckRequested = pyqtSignal(object)
+    hidrowebCheckRequested = pyqtSignal(object)
     cancelRequested = pyqtSignal()
 
     def __init__(self, iface, parent=None):
@@ -286,20 +300,23 @@ class AORCDialog(QDialog):
         )
         self.grid_widget = self._row_widget(self.grid_mode, self.block_km)
 
+        # Shared by every tab: AORC years computed at once and web requests sent at once.
         self.parallel_workers = QSpinBox()
         self.parallel_workers.setRange(1, max(1, os.cpu_count() or 1))
-        self.parallel_workers.setValue(min(2, self.parallel_workers.maximum()))
+        self.parallel_workers.setValue(
+            min(QgsSettings().value(PARALLEL_KEY, 4, type=int), self.parallel_workers.maximum())
+        )
+        self.parallel_workers.valueChanged.connect(lambda value: QgsSettings().setValue(PARALLEL_KEY, value))
         self.parallel_workers.setToolTip(
-            "Number of years downloaded simultaneously; higher is faster but uses more memory"
+            "Tasks run at once in every tab: AORC years and web requests; higher is faster, AORC uses more memory"
         )
 
         period_form.addRow("First year", self.start_year)
         period_form.addRow("Last year", self.end_year)
         period_form.addRow("Time step", self.timestep_widget)
         period_form.addRow("Grid size", self.grid_widget)
-        period_form.addRow("Parallel processing", self.parallel_workers)
 
-        output_group = QGroupBox("Output (required)")
+        output_group = QGroupBox("Output and processing")
         output_form = QFormLayout(output_group)
         aorc_output_group = QGroupBox("Variables and export formats")
         aorc_output_form = QFormLayout(aorc_output_group)
@@ -380,6 +397,7 @@ class AORCDialog(QDialog):
         )
         output_form.addRow("Target CRS", self.target_crs)
         output_form.addRow("Timezone", self.timezone)
+        output_form.addRow("Parallel processing", self.parallel_workers)
         aorc_output_form.addRow(variables_label, variables_widget)
         aorc_output_form.addRow(
             "Export formats", self._row_widget(self.write_csv, self.write_swat)
@@ -387,9 +405,18 @@ class AORCDialog(QDialog):
         aorc_output_form.addRow("SWAT+ precipitation", self.swat_pcp_step)
 
         self.usgs_tab = UsgsTab()
-        self.usgs_tab.checkRequested.connect(self._usgs_check_clicked)
+        self.usgs_tab.checkRequested.connect(lambda: self._check_clicked("usgs"))
         self.usgs_tab.selectionChanged.connect(self._update_run_buttons)
         self.usgs_tab.run_button.clicked.connect(lambda: self._run_clicked("usgs"))
+        self.hidroweb_tab = HidrowebTab()
+        self.hidroweb_tab.checkRequested.connect(lambda: self._check_clicked("hidroweb"))
+        self.hidroweb_tab.selectionChanged.connect(self._update_run_buttons)
+        self.hidroweb_tab.run_button.clicked.connect(lambda: self._run_clicked("hidroweb"))
+        # Observed-data tabs: kind -> (tab, tab index, check signal).
+        self.observed_tabs = {
+            "usgs": (self.usgs_tab, TAB_USGS, self.usgsCheckRequested),
+            "hidroweb": (self.hidroweb_tab, TAB_HIDROWEB, self.hidrowebCheckRequested),
+        }
 
         # Each data tab has its own Run button; it turns into Cancel while that tab runs.
         self.aorc_run = QPushButton("Run")
@@ -400,6 +427,7 @@ class AORCDialog(QDialog):
         self.run_buttons = {
             "aorc": self.aorc_run,
             "usgs": self.usgs_tab.run_button,
+            "hidroweb": self.hidroweb_tab.run_button,
             "et": self.et_tab.run_button,
         }
 
@@ -410,6 +438,7 @@ class AORCDialog(QDialog):
             self._tab_page(period_group, aorc_output_group, footer=self.aorc_run), TAB_TITLES[TAB_AORC]
         )
         self.tabs.addTab(self.usgs_tab, TAB_TITLES[TAB_USGS])
+        self.tabs.addTab(self.hidroweb_tab, TAB_TITLES[TAB_HIDROWEB])
         self.tabs.addTab(self.et_tab, TAB_TITLES[TAB_ET])
         # Widen the window rather than hide or clip tab titles.
         self.tabs.setUsesScrollButtons(False)
@@ -434,18 +463,25 @@ class AORCDialog(QDialog):
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.buttons)
         self._input_groups = (aoi_group, output_group, period_group, aorc_output_group)
+        # Refreshes the elapsed time every second, also while a server is slow to answer.
+        self._progress = (0.0, "")
+        self._progress_time = time.monotonic()
+        self._clock = QTimer(self)
+        self._clock.setInterval(1000)
+        self._clock.timeout.connect(lambda: self._show_progress(*self._progress))
         self._running = False
         self._running_kind = None
         self._started = time.monotonic()
         self.aoi_source.currentIndexChanged.connect(self._update_source_widgets)
         self.grid_mode.currentIndexChanged.connect(self._update_grid_widgets)
-        # A new area makes the last USGS availability check obsolete.
-        self.aoi_source.currentIndexChanged.connect(self.usgs_tab.invalidate)
-        self.layer_combo.currentIndexChanged.connect(self.usgs_tab.invalidate)
-        self.shapefile_edit.textChanged.connect(self.usgs_tab.invalidate)
-        self.bounds_crs.crsChanged.connect(self.usgs_tab.invalidate)
-        for field in (self.west_lon, self.south_lat, self.east_lon, self.north_lat):
-            field.valueChanged.connect(self.usgs_tab.invalidate)
+        # A new area makes the last availability checks obsolete.
+        for tab in (self.usgs_tab, self.hidroweb_tab):
+            self.aoi_source.currentIndexChanged.connect(tab.invalidate)
+            self.layer_combo.currentIndexChanged.connect(tab.invalidate)
+            self.shapefile_edit.textChanged.connect(tab.invalidate)
+            self.bounds_crs.crsChanged.connect(tab.invalidate)
+            for field in (self.west_lon, self.south_lat, self.east_lon, self.north_lat):
+                field.valueChanged.connect(tab.invalidate)
         self._update_source_widgets()
         self._update_grid_widgets()
         self._update_run_buttons()
@@ -479,24 +515,27 @@ class AORCDialog(QDialog):
         return container
 
     def _update_run_buttons(self):
-        idle = not self._running and not self.usgs_tab._checking
-        ready = {"aorc": idle, "usgs": idle and self.usgs_tab.can_run(), "et": idle}
+        idle = not self._running and not any(tab._checking for tab, _, _ in self.observed_tabs.values())
+        ready = {"aorc": idle, "et": idle}
+        for kind, (tab, _, _) in self.observed_tabs.items():
+            ready[kind] = idle and tab.can_run()
         for kind, button in self.run_buttons.items():
             running_here = self._running_kind == kind
             button.setText("Cancel" if running_here else "Run")
             button.setEnabled(running_here or ready[kind])
 
-    def _usgs_check_clicked(self):
-        if self.usgs_tab._checking:
+    def _check_clicked(self, kind):
+        tab, index, signal = self.observed_tabs[kind]
+        if tab._checking:
             self.cancelRequested.emit()
             return
         if not self.validate_area():
             return
         settings = self.get_settings()
-        if settings["usgs"]["start_date"] > settings["usgs"]["end_date"]:
-            self._invalid(TAB_USGS, "Invalid period", "The start date must be on or before the end date.")
+        if settings[kind]["start_date"] > settings[kind]["end_date"]:
+            self._invalid(index, "Invalid period", "The start date must be on or before the end date.")
             return
-        self.usgsCheckRequested.emit(settings)
+        signal.emit(settings)
 
     def _run_clicked(self, kind):
         if self._running:
@@ -506,8 +545,8 @@ class AORCDialog(QDialog):
                     "Cancellation requested. Waiting for the active download to stop..."
                 )
             return
-        if kind == "usgs":
-            valid = self.validate_area() and self.validate_usgs() and self.usgs_tab.confirm_run()
+        if kind in self.observed_tabs:
+            valid = self.validate_area() and self.validate_observed(kind) and self.observed_tabs[kind][0].confirm_run()
         elif kind == "et":
             valid = self.validate_area() and self.validate_et()
         else:
@@ -523,21 +562,32 @@ class AORCDialog(QDialog):
         for group in self._input_groups:
             group.setEnabled(not running)
         self.usgs_tab.set_running(running)
+        self.hidroweb_tab.set_running(running)
         self.et_tab.set_running(running)
         self._update_run_buttons()
         if running:
             self._started = time.monotonic()
             self.progress_bar.setValue(0)
+            self._progress = (0.0, "Preparing extraction...")
+            self._progress_time = self._started
             self.progress_label.setText("Preparing extraction...")
+            self._clock.start()
+        else:
+            self._clock.stop()
 
-    def set_checking(self, checking):
-        """USGS availability check running in the background."""
-        self.usgs_tab.set_checking(checking)
+    def set_checking(self, checking, kind="usgs"):
+        """Availability check of an observed-data tab running in the background."""
+        self.observed_tabs[kind][0].set_checking(checking)
         for group in self._input_groups[:2]:
             group.setEnabled(not checking)
         self._update_run_buttons()
 
     def set_progress(self, percentage, message):
+        self._progress = (percentage, message)
+        self._progress_time = time.monotonic()
+        self._show_progress(percentage, message)
+
+    def _show_progress(self, percentage, message):
         self.progress_bar.setValue(max(0, min(100, round(percentage))))
         if self._running:
             elapsed = time.monotonic() - self._started
@@ -546,6 +596,13 @@ class AORCDialog(QDialog):
             if 3 <= percentage < 100:
                 remaining = elapsed * (100 - percentage) / percentage
                 message += f", about {_format_duration(remaining)} left"
+        stalled = self._running and time.monotonic() - self._progress_time >= STALL_SECONDS
+        if stalled:
+            message += (
+                f"\n{SERVER_NAMES.get(self._running_kind, 'The server')} has not answered for "
+                f"{_format_duration(time.monotonic() - self._progress_time)}; it may be down. Please wait."
+            )
+        self.progress_label.setStyleSheet("color: rgb(190, 0, 0)" if stalled else "")
         self.progress_label.setText(message)
 
     @staticmethod
@@ -692,6 +749,7 @@ class AORCDialog(QDialog):
             "write_csv": self.write_csv.isChecked(),
             "write_swat": self.write_swat.isChecked(),
             "usgs": self.usgs_tab.get_settings(),
+            "hidroweb": self.hidroweb_tab.get_settings(),
             "et": self.et_tab.get_settings(),
         }
 
@@ -738,24 +796,24 @@ class AORCDialog(QDialog):
             return self._invalid(TAB_AREA, "Invalid CRS", "Choose a target coordinate reference system.")
         return True
 
-    def validate_usgs(self):
-        """Checks for tab 3 (USGS data)."""
-        usgs = self.usgs_tab
-        if usgs.inventory is None:
-            return self._invalid(TAB_USGS, "Check available data first", "Press 'Check available data' before downloading.")
-        if not usgs.selection():
-            return self._invalid(TAB_USGS, "Nothing selected", "Check at least one available box.")
-        settings = usgs.get_settings()
+    def validate_observed(self, kind):
+        """Checks for tab 3 (USGS data) or tab 4 (HidroWeb data)."""
+        tab, index, _ = self.observed_tabs[kind]
+        if tab.inventory is None:
+            return self._invalid(index, "Check available data first", "Press 'Check available data' before downloading.")
+        if not tab.selection():
+            return self._invalid(index, "Nothing selected", "Check at least one available box.")
+        settings = tab.get_settings()
         if settings["site_ids"] is not None and not settings["site_ids"]:
             return self._invalid(
-                TAB_USGS,
+                index,
                 "No stations selected",
                 "Select preview points on the map, or clear 'Only stations selected on the map'.",
             )
         return True
 
     def validate_et(self):
-        """Checks for tab 4 (evapotranspiration), then the Google Earth Engine setup steps."""
+        """Checks for tab 5 (evapotranspiration), then the Google Earth Engine setup steps."""
         settings = self.et_tab.get_settings()
         if settings["start_year"] > settings["end_year"]:
             return self._invalid(TAB_ET, "Invalid year range", "The first year must be on or before the last year.")

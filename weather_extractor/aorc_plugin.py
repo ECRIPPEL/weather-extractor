@@ -32,11 +32,14 @@ USGS_MODULES = ["numpy", "pandas", "requests", "shapely", "osgeo"]
 ET_MODULES = ["numpy", "pandas", "shapely"]
 TASK_TITLES = {
     "aorc": "Weather Extractor: AORC weather",
-    "usgs_check": "Weather Extractor: check observed data",
-    "usgs": "Weather Extractor: observed data",
+    "usgs_check": "Weather Extractor: check USGS data",
+    "usgs": "Weather Extractor: USGS data",
+    "hidroweb_check": "Weather Extractor: check HidroWeb data",
+    "hidroweb": "Weather Extractor: HidroWeb data",
     "et": "Weather Extractor: evapotranspiration",
 }
-RESULT_TITLES = {"aorc": "AORC", "usgs": "Observed data", "et": "Evapotranspiration"}
+RESULT_TITLES = {"aorc": "AORC", "usgs": "USGS data", "hidroweb": "HidroWeb data", "et": "Evapotranspiration"}
+CHECK_FUNCTIONS = {"usgs": "usgs_inventory", "hidroweb": "hidroweb_inventory"}
 
 
 class _TaskProgressBridge(QObject):
@@ -113,7 +116,8 @@ class AORCWeatherPlugin:
             return
         dialog = AORCDialog(self.iface, self.iface.mainWindow())
         dialog.extractionRequested.connect(self._start_extraction)
-        dialog.usgsCheckRequested.connect(self._start_usgs_check)
+        dialog.usgsCheckRequested.connect(lambda settings: self._start_check("usgs", settings))
+        dialog.hidrowebCheckRequested.connect(lambda settings: self._start_check("hidroweb", settings))
         dialog.cancelRequested.connect(self._cancel_extraction)
         dialog.finished.connect(self._dialog_closed)
         self.dialog = dialog
@@ -167,28 +171,29 @@ class AORCWeatherPlugin:
             self._task_active = False
             raise
 
-    # -- USGS availability check -------------------------------------------
+    # -- Availability checks (USGS and HidroWeb tabs) ------------------------
 
-    def _start_usgs_check(self, settings):
+    def _start_check(self, kind, settings):
         dialog = self.dialog
         if dialog is None or self._task_active:
             return
-        if self._missing_modules(USGS_MODULES, "Observed data dependencies are missing"):
+        if self._missing_modules(USGS_MODULES, "Data dependencies are missing"):
             return
         try:
             geometry = self._get_aoi_geometry(settings, show=False)
         except Exception as exc:
             QMessageBox.critical(self.iface.mainWindow(), "Invalid area of interest", str(exc))
             return
-        from .usgs_inventory import check_availability
+        from importlib import import_module
 
-        dialog.set_checking(True)
+        check_availability = import_module(f".{CHECK_FUNCTIONS[kind]}", __package__).check_availability
+        dialog.set_checking(True, kind)
         self._launch(
-            "usgs_check",
+            f"{kind}_check",
             lambda progress, is_canceled: check_availability(
-                settings["usgs"], geometry, progress, is_canceled
+                dict(settings[kind], parallel_workers=settings["parallel_workers"]), geometry, progress, is_canceled
             ),
-            dialog.usgs_tab.set_check_progress,
+            dialog.observed_tabs[kind][0].set_check_progress,
         )
 
     # -- Extractions ---------------------------------------------------------
@@ -199,6 +204,9 @@ class AORCWeatherPlugin:
             return
         if settings.get("kind") == "usgs":
             self._start_usgs_extraction(settings)
+            return
+        if settings.get("kind") == "hidroweb":
+            self._start_hidroweb_extraction(settings)
             return
         if settings.get("kind") == "et":
             self._start_et_extraction(settings)
@@ -250,14 +258,14 @@ class AORCWeatherPlugin:
 
     def _start_usgs_extraction(self, settings):
         dialog = self.dialog
-        if self._missing_modules(USGS_MODULES, "Observed data dependencies are missing"):
+        if self._missing_modules(USGS_MODULES, "Data dependencies are missing"):
             dialog.set_running(False)
             return
         from .usgs_export import extract_usgs
 
         usgs_settings = dict(
             settings["usgs"], output_dir=settings["output_dir"], target_crs=settings["target_crs"],
-            timezone=settings["timezone"],
+            timezone=settings["timezone"], parallel_workers=settings["parallel_workers"],
         )
         inventory = dialog.usgs_tab.inventory
         try:
@@ -265,6 +273,31 @@ class AORCWeatherPlugin:
                 "usgs",
                 lambda progress, is_canceled: extract_usgs(
                     usgs_settings, inventory, progress, is_canceled
+                ),
+                dialog.set_progress,
+            )
+        except Exception:
+            dialog.set_running(False)
+            raise
+        self._running_message()
+
+    def _start_hidroweb_extraction(self, settings):
+        dialog = self.dialog
+        if self._missing_modules(USGS_MODULES, "HidroWeb data dependencies are missing"):
+            dialog.set_running(False)
+            return
+        from .hidroweb_export import extract_hidroweb
+
+        hidroweb_settings = dict(
+            settings["hidroweb"], output_dir=settings["output_dir"], target_crs=settings["target_crs"],
+            parallel_workers=settings["parallel_workers"],
+        )
+        inventory = dialog.hidroweb_tab.inventory
+        try:
+            self._launch(
+                "hidroweb",
+                lambda progress, is_canceled: extract_hidroweb(
+                    hidroweb_settings, inventory, progress, is_canceled
                 ),
                 dialog.set_progress,
             )
@@ -294,7 +327,7 @@ class AORCWeatherPlugin:
             dialog.set_running(False)
             QMessageBox.critical(self.iface.mainWindow(), "Google Earth Engine unavailable", str(exc))
             return
-        et_settings = dict(settings["et"], output_dir=settings["output_dir"])
+        et_settings = dict(settings["et"], output_dir=settings["output_dir"], parallel_workers=settings["parallel_workers"])
         try:
             self._launch(
                 "et",
@@ -336,8 +369,8 @@ class AORCWeatherPlugin:
         if self.action is not None:
             self.action.setEnabled(True)
         dialog = self.dialog
-        if kind == "usgs_check":
-            self._check_finished(successful, result, error)
+        if kind.endswith("_check"):
+            self._check_finished(kind[: -len("_check")], successful, result, error)
             return
         if dialog is not None:
             dialog.set_running(False)
@@ -347,6 +380,8 @@ class AORCWeatherPlugin:
                 self._load_aorc_layers(result)
             elif kind == "et":
                 self._et_finished(result)
+            elif kind == "hidroweb":
+                self._load_hidroweb_layers(result)
             else:
                 self._load_usgs_layers(result)
         elif error is not None and not isinstance(error, InterruptedError):
@@ -362,18 +397,27 @@ class AORCWeatherPlugin:
                 "The extraction was canceled. Any outputs already written may be incomplete.",
             )
 
-    def _check_finished(self, successful, inventory, error):
+    def _check_finished(self, kind, successful, inventory, error):
         dialog = self.dialog
         if dialog is None:
             return
-        dialog.set_checking(False)
+        tab = dialog.observed_tabs[kind][0]
+        dialog.set_checking(False, kind)
         if successful:
-            dialog.usgs_tab.set_inventory(inventory)
+            tab.set_inventory(inventory)
+            if getattr(inventory, "failed_queries", 0):
+                QMessageBox.warning(
+                    self.iface.mainWindow(),
+                    f"{RESULT_TITLES[kind]} check incomplete",
+                    f"The server refused {inventory.failed_queries} inventory queries even after waiting "
+                    "(too many requests), so some stations may be missing from the list.\n\n"
+                    "Press 'Check available data' again in a few minutes.",
+                )
         elif error is not None and not isinstance(error, InterruptedError):
-            dialog.usgs_tab.check_status.setText(f"Check failed: {error}")
-            QMessageBox.critical(self.iface.mainWindow(), "Observed data check failed", f"{error}")
+            tab.check_status.setText(f"Check failed: {error}")
+            QMessageBox.critical(self.iface.mainWindow(), f"{RESULT_TITLES[kind]} check failed", f"{error}")
         else:
-            dialog.usgs_tab.check_status.setText("Check canceled.")
+            tab.check_status.setText("Check canceled.")
 
     def _completion_message(self, title, text, result):
         warnings = ""
@@ -450,7 +494,7 @@ class AORCWeatherPlugin:
         gpkg = str(result["gpkg"])
         label = result["label"]
         project = QgsProject.instance()
-        group = project.layerTreeRoot().insertGroup(0, f"Observed data {label}")
+        group = project.layerTreeRoot().insertGroup(0, f"USGS data {label}")
         from .usgs_catalog import LAYER_CHANNEL, QUALITY, QUANTITY
         from .usgs_export import LAYER_NAMES
         from .usgs_tab import LAYER_STYLES
@@ -473,13 +517,57 @@ class AORCWeatherPlugin:
                 f"{result['point_count']} water-quality point(s).",
             )
         self._completion_message(
-            "Observed data extraction complete",
+            "USGS data extraction complete",
             f"Downloaded data for {result['station_count']} quantity station(s) and "
-            f"{result['point_count']} water-quality point(s).\n\n"
+            f"{result['point_count']} water-quality point(s).{self._excluded_text(result)}\n\n"
             f"Output folder: {result['output_dir']}\n"
             f"Station layers: {gpkg}",
             result,
         )
+        if dialog is not None:
+            dialog.usgs_tab.keep_downloaded(result["downloaded"])
+
+    @staticmethod
+    def _excluded_text(result):
+        count = result.get("excluded", 0)
+        if not count:
+            return ""
+        return f"\n\n{count} station(s) were excluded because they had no data in the period."
+
+    def _load_hidroweb_layers(self, result):
+        dialog = self.dialog
+        gpkg = str(result["gpkg"])
+        label = result["label"]
+        project = QgsProject.instance()
+        group = project.layerTreeRoot().insertGroup(0, f"HidroWeb data {label}")
+        from .hidroweb_catalog import LAYER_NAMES, RAIN, STREAMFLOW
+        from .hidroweb_tab import LAYER_STYLES
+
+        for key in (STREAMFLOW, RAIN):
+            name = LAYER_NAMES[key]
+            if name not in result["layers"]:
+                continue
+            title, style = LAYER_STYLES[key]
+            layer = QgsVectorLayer(f"{gpkg}|layername={name}", f"{title} ({label})", "ogr")
+            if layer.isValid():
+                layer.renderer().setSymbol(QgsMarkerSymbol.createSimple(style))
+                project.addMapLayer(layer, False)
+                group.addLayer(layer)
+        counts = (
+            f"{result['station_count']} streamflow station(s) and {result['gauge_count']} rain gauge(s)"
+        )
+        if dialog is not None:
+            dialog.set_progress(100, f"Complete: {counts}.")
+        self._completion_message(
+            "HidroWeb extraction complete",
+            f"Downloaded daily series of {counts}.{self._excluded_text(result)}\n\n"
+            f"Output folder: {result['output_dir']}\n"
+            f"Station index: {result['summary']}\n"
+            f"Station layers: {gpkg}",
+            result,
+        )
+        if dialog is not None:
+            dialog.hidroweb_tab.keep_downloaded(result["downloaded"])
 
     def _get_aoi_geometry(self, settings, show=True):
         """The AOI in EPSG:4326 as a shapely geometry; ``show`` adds/zooms it on the map."""

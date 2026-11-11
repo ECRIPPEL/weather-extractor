@@ -372,11 +372,31 @@ def ghcn_jobs(entries, start, end):
     ]
 
 
-def download_ghcn(client, entries, start, end, report=None):
+def _parallel(jobs, fetch, workers, report=None):
+    """fetch(job) for every job, ``workers`` at a time, reporting (done, total); results in job order."""
+    lock = threading.Lock()
+    finished = [0]
+
+    def run(job):
+        result = fetch(job)
+        with lock:
+            finished[0] += 1
+            done = finished[0]
+        if report:
+            report(done, len(jobs))
+        return result
+
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        return list(pool.map(run, jobs))
+
+
+def download_ghcn(client, entries, start, end, report=None, workers=SERIES_WORKERS):
     """Daily precipitation (mm) of GHCN-Daily stations as one long table, plus warnings."""
     jobs = ghcn_jobs(entries, start, end)
-    frames, warnings = [], []
-    for done, (batch, first, last) in enumerate(jobs, start=1):
+    warnings = []
+
+    def fetch(job):
+        batch, first, last = job
         try:
             frame = client.ncei_data(
                 {
@@ -394,10 +414,9 @@ def download_ghcn(client, entries, start, end, report=None):
         except Exception as exc:
             warnings.append(f"GHCN-Daily precipitation of {len(batch)} station(s), {first} to {last}: {exc}")
             frame = pd.DataFrame()
-        if not frame.empty and "PRCP" in frame:
-            frames.append(frame)
-        if report:
-            report(done, len(jobs))
+        return frame
+
+    frames = [f for f in _parallel(jobs, fetch, workers, report) if not f.empty and "PRCP" in f]
     if not frames:
         return pd.DataFrame(columns=["STATION", "DATE", "PRCP", "PRCP_ATTRIBUTES"]), warnings
     table = pd.concat(frames, ignore_index=True)
@@ -473,12 +492,14 @@ def ghcnh_jobs(entries, start, end, timezone=TIMEZONE):
     ]
 
 
-def download_ghcnh(client, entries, start, end, timezone=TIMEZONE, report=None):
+def download_ghcnh(client, entries, start, end, timezone=TIMEZONE, report=None, workers=SERIES_WORKERS):
     """GHCNh precipitation reports (mm, UTC) of the stations as one long table, plus warnings."""
     jobs = ghcnh_jobs(entries, start, end, timezone)
     columns = ["STATION", "DATE", "precipitation"] + GHCNH_FIELDS
-    frames, warnings = [], []
-    for done, (batch, first, last) in enumerate(jobs, start=1):
+    warnings = []
+
+    def fetch(job):
+        batch, first, last = job
         try:
             frame = client.ncei_data(
                 {
@@ -493,12 +514,13 @@ def download_ghcnh(client, entries, start, end, timezone=TIMEZONE, report=None):
             raise
         except Exception as exc:
             warnings.append(f"GHCNh precipitation of {len(batch)} station(s), {first} to {last}: {exc}")
-            frame = pd.DataFrame()
-        if not frame.empty and "precipitation" in frame:
-            # Most rows of 5- and 15-minute stations carry no precipitation total.
-            frames.append(frame[frame["precipitation"] != ""].reindex(columns=columns, fill_value=""))
-        if report:
-            report(done, len(jobs))
+            return None
+        if frame.empty or "precipitation" not in frame:
+            return None
+        # Most rows of 5- and 15-minute stations carry no precipitation total.
+        return frame[frame["precipitation"] != ""].reindex(columns=columns, fill_value="")
+
+    frames = [f for f in _parallel(jobs, fetch, workers, report) if f is not None]
     if not frames:
         return pd.DataFrame(columns=columns), warnings
     return pd.concat(frames, ignore_index=True), warnings
@@ -587,7 +609,7 @@ def _standard_samples(frame, mapping, source, row, group=None):
     return table
 
 
-def download_samples(client, entries, start, end, sites, report=None):
+def download_samples(client, entries, start, end, sites, report=None, workers=SAMPLE_WORKERS):
     """Samples of the selected sites; USGS sites from USGS Samples, others from WQP."""
     jobs = []
     rows = {}
@@ -642,7 +664,7 @@ def download_samples(client, entries, start, end, sites, report=None):
                 report(finished[0], len(jobs))
         return table
 
-    with ThreadPoolExecutor(max_workers=SAMPLE_WORKERS) as pool:
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         for table in pool.map(guarded, jobs):
             if table is not None and not table.empty:
                 tables.append(table)
@@ -865,6 +887,7 @@ def extract_usgs(settings, inventory, progress=None, is_canceled=None, client=No
     client = client or UsgsClient(settings.get("api_key", ""), is_canceled)
     start, end = inventory.start, inventory.end
     timezone = settings.get("timezone", TIMEZONE)
+    workers = max(1, int(settings.get("parallel_workers") or SERIES_WORKERS))
     base = Path(settings["output_dir"]) / "usgs_water_data"
     folders = {QUANTITY: base / "quantity", QUALITY: base / "quality"}
     warnings = list(inventory.warnings)
@@ -899,7 +922,7 @@ def extract_usgs(settings, inventory, progress=None, is_canceled=None, client=No
 
     results = {(group, column): [] for group in (QUANTITY, QUALITY) for column in (DAILY, CONTINUOUS)}
     report(0.0, f"Downloading USGS series: 0 of {len(series)}")
-    with ThreadPoolExecutor(max_workers=SERIES_WORKERS) as pool:
+    with ThreadPoolExecutor(max_workers=workers) as pool:
         for entry, data in pool.map(fetch, series):
             if data is not None and data["value"].notna().any():
                 group = ROWS_BY_KEY[entry["row"]].group
@@ -970,10 +993,10 @@ def extract_usgs(settings, inventory, progress=None, is_canceled=None, client=No
             report(share + 1.5 * done / total, f"{message}: {done} of {total} requests")
 
         if column == DAILY:
-            table, ghcn_warnings = download_ghcn(client, ghcn, start, end, step)
+            table, ghcn_warnings = download_ghcn(client, ghcn, start, end, step, workers)
             ghcn_counts, periods = write_ghcn_tables(folders[QUANTITY] / "daily", table, ghcn, start, end)
         else:
-            table, ghcn_warnings = download_ghcnh(client, ghcn, start, end, timezone, step)
+            table, ghcn_warnings = download_ghcnh(client, ghcn, start, end, timezone, step, workers)
             ghcn_counts, periods = write_ghcnh_tables(
                 folders[QUANTITY] / "hourly", table, ghcn, start, end, timezone
             )
@@ -992,6 +1015,7 @@ def extract_usgs(settings, inventory, progress=None, is_canceled=None, client=No
         samples, sample_warnings = download_samples(
             client, sample_entries, start, end, inventory.sites,
             lambda done, total: report(70.0 + 25.0 * done / total, f"Downloading water-quality samples: {done} of {total} requests"),
+            workers,
         )
         warnings.extend(sample_warnings)
         if not samples.empty:
@@ -1072,6 +1096,8 @@ def extract_usgs(settings, inventory, progress=None, is_canceled=None, client=No
             {r["site_id"] for r in layers["quantity_stations"] + layers["channel_geometry_stations"]}
         ),
         "point_count": len(layers["quality_points"]),
+        "downloaded": [(e["site_id"], e["row"], e["column"]) for e in downloaded],
+        "excluded": len({e["site_id"] for e in entries} - {e["site_id"] for e in downloaded}),
         "gpkg": gpkg_path,
         "layers": [name for name, records in layers.items() if records],
         "shapefiles": shapefiles,

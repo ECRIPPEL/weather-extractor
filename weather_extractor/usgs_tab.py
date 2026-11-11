@@ -1,4 +1,4 @@
-"""Observed Data tab (USGS, Water Quality Portal, NOAA GHCN): availability check, selection tables, and map preview."""
+"""USGS Data tab (USGS, Water Quality Portal, NOAA GHCN): availability check, selection tables, and map preview."""
 
 from datetime import date, timedelta
 
@@ -49,7 +49,7 @@ SETTINGS_KEY = "weather_extractor/usgs_api_key"
 SKIP_KEY_NOTICE = "weather_extractor/skip_api_key_notice"
 ROW_HEIGHT = 19
 ROW_TOGGLE = "row"
-PREVIEW_GROUP = "Observed data (preview)"
+PREVIEW_GROUP = "USGS data (preview)"
 # Map symbols shared by the preview and the final layers. Channel geometry is a
 # horizontal dash drawn over the station triangle, at the same size.
 LAYER_STYLES = {
@@ -69,23 +69,27 @@ PREVIEW_STYLE = {
 class PreviewLayers:
     """Temporary memory layers that show the available sites on the map."""
 
-    def __init__(self):
+    def __init__(self, group=PREVIEW_GROUP, styles=None):
+        self.group_name = group
+        # (layer key, title, symbol) in layer-tree order: the first is drawn on top.
+        # Channel first, so its dash is drawn on top of the station triangles.
+        self.styles = styles or [(key, *PREVIEW_STYLE[key]) for key in (LAYER_CHANNEL, QUANTITY, QUALITY)]
         self.layers = {}
+        # Called when the selection of a preview layer changes on the map.
+        self.on_selection = None
 
     def build(self, inventory):
         self.remove()
         project = QgsProject.instance()
         root = project.layerTreeRoot()
-        group = root.findGroup(PREVIEW_GROUP)
+        group = root.findGroup(self.group_name)
         if group is not None:
             # Previews left by an earlier window are replaced.
             for node in group.findLayers():
                 project.removeMapLayer(node.layerId())
         else:
-            group = root.insertGroup(0, PREVIEW_GROUP)
-        # Channel first, so its dash is drawn on top of the station triangles.
-        for layer_group in (LAYER_CHANNEL, QUANTITY, QUALITY):
-            name, style = PREVIEW_STYLE[layer_group]
+            group = root.insertGroup(0, self.group_name)
+        for layer_group, name, style in self.styles:
             layer = QgsVectorLayer(
                 "Point?crs=EPSG:4326&field=site_id:string&field=name:string&field=site_type:string"
                 "&field=org:string&field=source:string&field=datasets:string(254)&field=visible:integer",
@@ -102,7 +106,7 @@ class PreviewLayers:
                         site.get("name", ""),
                         site.get("type", ""),
                         site.get("org", ""),
-                        SITE_SOURCES.get(site.get("source"), "Other agency"),
+                        site.get("source_label") or SITE_SOURCES.get(site.get("source"), "Other agency"),
                         inventory.describe(site_id, layer_group)[:254],
                         1,
                     ]
@@ -112,6 +116,8 @@ class PreviewLayers:
             layer.dataProvider().addFeatures(features)
             layer.updateExtents()
             layer.renderer().setSymbol(QgsMarkerSymbol.createSimple(style))
+            if self.on_selection is not None:
+                layer.selectionChanged.connect(lambda *_: self.on_selection())
             project.addMapLayer(layer, False)
             group.addLayer(layer)
             self.layers[layer_group] = layer
@@ -147,7 +153,7 @@ class PreviewLayers:
                 project.removeMapLayer(layer.id())
         self.layers = {}
         root = project.layerTreeRoot()
-        group = root.findGroup(PREVIEW_GROUP)
+        group = root.findGroup(self.group_name)
         if group is not None and not group.children():
             root.removeChildNode(group)
 
@@ -168,6 +174,7 @@ class UsgsTab(QWidget):
         super().__init__(parent)
         self.inventory = None
         self.preview = PreviewLayers()
+        self.preview.on_selection = self._update_counter
         self._updating = False
         self._checking = False
 
@@ -252,7 +259,7 @@ class UsgsTab(QWidget):
 
         self.only_selected = QCheckBox("Only stations selected on the map")
         self.only_selected.setToolTip("Download only the preview points selected with the QGIS selection tools")
-        self.only_selected.toggled.connect(lambda _: self.selectionChanged.emit())
+        self.only_selected.toggled.connect(lambda _: self._update_counter())
         self.write_shapefile = QCheckBox("Also save station layers as shapefiles")
         self.write_shapefile.setToolTip("The GeoPackage is always written")
         self.counter = QLabel("")
@@ -465,11 +472,23 @@ class UsgsTab(QWidget):
         self._updating = False
         self._refresh()
 
+    def _visible(self):
+        return self.inventory.visible_sites(set(self.selection()), self.sample_sources())
+
     def _refresh(self):
         if self.inventory is None:
             return
-        visible = self.inventory.visible_sites(set(self.selection()), self.sample_sources())
-        self.preview.update(visible)
+        self.preview.update(self._visible())
+        self._update_counter()
+
+    def _update_counter(self):
+        """Sites the next Run downloads: only the map selection when that box is checked."""
+        if self.inventory is None:
+            return
+        visible = self._visible()
+        if self.only_selected.isChecked():
+            chosen = self.preview.selected_site_ids()
+            visible = {layer: sites & chosen for layer, sites in visible.items()}
         quantity = len(visible[QUANTITY] | visible[LAYER_CHANNEL])
         self.counter.setText(
             f"Selected: {quantity:,} quantity station(s), "
@@ -484,6 +503,18 @@ class UsgsTab(QWidget):
         site_ids = self.get_settings()["site_ids"]
         return self.inventory.rain_gauges(
             set(self.selection()), self.sample_sources(), set(site_ids) if site_ids is not None else None
+        )
+
+    def keep_downloaded(self, keys):
+        """After a run, the table and the map keep only the datasets that returned data."""
+        if self.inventory is None:
+            return
+        self.inventory.keep(set(keys))
+        # The map then shows exactly the downloaded stations, so the map selection is not needed.
+        self.only_selected.setChecked(False)
+        self.set_inventory(self.inventory)
+        self.check_status.setText(
+            "Showing the stations with data from the last run. Press 'Check available data' to see all again."
         )
 
     def can_run(self):
@@ -511,7 +542,7 @@ class UsgsTab(QWidget):
         requests = estimate_requests(self.inventory, settings)
         box = QMessageBox(
             QMessageBox.Information,
-            "Observed data download",
+            "USGS data download",
             f"This request needs about {requests:,} download(s) from USGS, EPA, and NOAA services\n"
             "and may take a while to finish.\n\n"
             "For a faster run, use a free USGS Water Data API key:\n"
