@@ -57,8 +57,8 @@ TAB_TITLES = ["1. Setup", "2. Gridded Data", "3. USGS Data", "4. HidroWeb Data",
 TAB_DESCRIPTIONS = [
     "Define the area of interest, output folder, timezone, and parallel processing first, then "
     "choose the data in the other tabs. The elevation raster is optional.",
-    "NOAA AORC gridded weather: hourly, ~800 m, from 1979; daily and hourly series, FAO-56 "
-    "reference ET, and SWAT+ files.",
+    "Gridded weather from NOAA AORC (USA, ~800 m) or ERA5-Land (global, ~9 km): daily and "
+    "hourly series, FAO-56 reference ET, and SWAT+ files.",
     "Observed data: USGS water quantity and quality, EPA Water Quality Portal samples, and "
     "NOAA GHCN daily and hourly rain gauges.",
     "ANA HidroWeb (Brazil): daily discharge, water level, and rainfall of the national "
@@ -67,10 +67,26 @@ TAB_DESCRIPTIONS = [
 ]
 DEFAULT_TIMEZONE = "Etc/GMT+6"
 PARALLEL_KEY = "weather_extractor/parallel_workers"
+DATASET_KEY = "weather_extractor/gridded_dataset"
+# Gridded datasets of tab 2: combo label, first year, name in the grid choices, cell size,
+# fixed block sizes (km), and the smallest custom block (km).
+GRIDDED_DATASETS = {
+    "aorc": {
+        "label": "AORC (USA, ~800 m, from 1979)", "first_year": 1979, "first_tip": "From 1979 (data starts on 1979-02-01)",
+        "name": "AORC", "cell": "~800 m", "blocks": (5, 10, 50), "min_block": 1.0,
+    },
+    "era5land": {
+        "label": "ERA5-Land (global, ~9 km, from 1950)", "first_year": 1950, "first_tip": "From 1950",
+        "name": "ERA5-Land", "cell": "~9 km", "blocks": (50,), "min_block": 10.0,
+    },
+}
+# Variables only ERA5-Land has; their boxes are hidden for AORC.
+ERA5_ONLY = ("evap", "runoff", "soil")
 # Without any progress for this long, the progress line says the server is not answering.
 STALL_SECONDS = 300
 SERVER_NAMES = {
     "aorc": "The AORC archive (AWS)",
+    "era5land": "Google Earth Engine",
     "usgs": "The USGS, EPA, or NOAA service",
     "hidroweb": "The HidroWeb portal (ANA)",
     "et": "Google Earth Engine",
@@ -247,6 +263,13 @@ class AORCDialog(QDialog):
         period_group = QGroupBox("Period, time step, and grid")
         period_form = QFormLayout(period_group)
 
+        self.dataset = QComboBox()
+        for key, dataset in GRIDDED_DATASETS.items():
+            self.dataset.addItem(dataset["label"], key)
+        saved = self.dataset.findData(QgsSettings().value(DATASET_KEY, "aorc"))
+        self.dataset.setCurrentIndex(max(0, saved))
+        self.dataset.setToolTip("ERA5-Land comes from Google Earth Engine (setup as in tab 5)")
+
         latest_complete_year = max(1979, date.today().year - 1)
         self.start_year = QSpinBox()
         self.start_year.setRange(1979, latest_complete_year)
@@ -264,7 +287,7 @@ class AORCDialog(QDialog):
         self.daily_step.setChecked(True)
         self.daily_step.setToolTip("Summarized per local day")
         self.hourly_step = QCheckBox("Hourly")
-        self.hourly_step.setToolTip("Original AORC values")
+        self.hourly_step.setToolTip("Original hourly values")
         self.timestep_widget = self._row_widget(self.daily_step, self.hourly_step)
         self.timestep_widget.layout().addStretch(1)
 
@@ -273,23 +296,11 @@ class AORCDialog(QDialog):
             self.timezone.addItem(label, value)
         self.timezone.setCurrentIndex(self.timezone.findData(DEFAULT_TIMEZONE))
         self.timezone.setToolTip(
-            "Local standard time of the AORC and NOAA hourly data (no daylight saving time)"
+            "Local standard time of the gridded and NOAA hourly data (no daylight saving time)"
         )
 
+        # Filled by _update_dataset_widgets: the choices name the cells of the selected dataset.
         self.grid_mode = QComboBox()
-        self.grid_mode.addItem("Original AORC grid (~800 m)", ("original", None))
-        self.grid_mode.addItem("5 km grid (mean of AORC cells)", ("block", 5.0))
-        self.grid_mode.addItem("10 km grid (mean of AORC cells)", ("block", 10.0))
-        self.grid_mode.addItem("50 km grid (mean of AORC cells)", ("block", 50.0))
-        self.grid_mode.addItem("Custom grid size (mean of AORC cells)", ("block", None))
-        self.grid_mode.addItem("Rain gauges of tab 3 (nearest AORC cell)", ("gauges", None))
-        self.grid_mode.addItem("Single station (AOI centroid)", ("single", None))
-        self.grid_mode.setCurrentIndex(self.grid_mode.count() - 1)
-        self.grid_mode.setToolTip(
-            "Original: one station per AORC cell (~800 m); km grids: mean of the cells in "
-            "each block; Rain gauges: the cell of each precipitation station checked in tab 3; "
-            "Single station: the cell at the AOI centroid (fastest)"
-        )
         self.block_km = QDoubleSpinBox()
         self.block_km.setRange(1.0, 500.0)
         self.block_km.setDecimals(1)
@@ -311,6 +322,7 @@ class AORCDialog(QDialog):
             "Tasks run at once in every tab: AORC years and web requests; higher is faster, AORC uses more memory"
         )
 
+        period_form.addRow("Dataset", self.dataset)
         period_form.addRow("First year", self.start_year)
         period_form.addRow("Last year", self.end_year)
         period_form.addRow("Time step", self.timestep_widget)
@@ -356,16 +368,14 @@ class AORCDialog(QDialog):
                     "Wind",
                     "m/s at 10 m; hourly values or daily means",
                 ),
-                (
-                    "eto",
-                    "Reference ET",
-                    "FAO-56 Penman-Monteith grass reference ET (mm), calculated from AORC "
-                    "temperature, humidity, pressure, solar radiation, and wind",
-                ),
+                ("eto", "Reference ET", "FAO-56 Penman-Monteith grass reference ET (mm)"),
+                ("evap", "Evaporation", "Total evaporation, with transpiration (mm); CSV only"),
+                ("runoff", "Runoff", "Surface and subsurface runoff (mm); CSV only"),
+                ("soil", "Soil moisture", "Water fraction of 4 layers (0-7, 7-28, 28-100, 100-289 cm); CSV only"),
             ]
         ):
             check = QCheckBox(label)
-            check.setChecked(key != "eto")
+            check.setChecked(key not in ("eto",) + ERA5_ONLY)
             check.setToolTip(tooltip)
             self.variable_checks[key] = check
             variables_grid.addWidget(check, index // 3, index % 3)
@@ -420,7 +430,7 @@ class AORCDialog(QDialog):
 
         # Each data tab has its own Run button; it turns into Cancel while that tab runs.
         self.aorc_run = QPushButton("Run")
-        self.aorc_run.setToolTip("Extract AORC weather for the area of tab 1")
+        self.aorc_run.setToolTip("Extract gridded weather for the area of tab 1")
         self.aorc_run.clicked.connect(lambda: self._run_clicked("aorc"))
         self.et_tab = EtTab()
         self.et_tab.run_button.clicked.connect(lambda: self._run_clicked("et"))
@@ -474,6 +484,7 @@ class AORCDialog(QDialog):
         self._started = time.monotonic()
         self.aoi_source.currentIndexChanged.connect(self._update_source_widgets)
         self.grid_mode.currentIndexChanged.connect(self._update_grid_widgets)
+        self.dataset.currentIndexChanged.connect(self._update_dataset_widgets)
         # A new area makes the last availability checks obsolete.
         for tab in (self.usgs_tab, self.hidroweb_tab):
             self.aoi_source.currentIndexChanged.connect(tab.invalidate)
@@ -483,7 +494,7 @@ class AORCDialog(QDialog):
             for field in (self.west_lon, self.south_lat, self.east_lon, self.north_lat):
                 field.valueChanged.connect(tab.invalidate)
         self._update_source_widgets()
-        self._update_grid_widgets()
+        self._update_dataset_widgets()
         self._update_run_buttons()
 
     @staticmethod
@@ -598,8 +609,11 @@ class AORCDialog(QDialog):
                 message += f", about {_format_duration(remaining)} left"
         stalled = self._running and time.monotonic() - self._progress_time >= STALL_SECONDS
         if stalled:
+            server = self._running_kind
+            if server == "aorc":
+                server = self.dataset.currentData()
             message += (
-                f"\n{SERVER_NAMES.get(self._running_kind, 'The server')} has not answered for "
+                f"\n{SERVER_NAMES.get(server, 'The server')} has not answered for "
                 f"{_format_duration(time.monotonic() - self._progress_time)}; it may be down. Please wait."
             )
         self.progress_label.setStyleSheet("color: rgb(190, 0, 0)" if stalled else "")
@@ -705,9 +719,52 @@ class AORCDialog(QDialog):
         mode, size = self.grid_mode.currentData()
         self.block_km.setVisible(mode == "block" and size is None)
 
+    def _update_dataset_widgets(self):
+        """Years, grid choices, and variables of the dataset chosen in tab 2."""
+        key = self.dataset.currentData()
+        QgsSettings().setValue(DATASET_KEY, key)
+        dataset = GRIDDED_DATASETS[key]
+        name = dataset["name"]
+        for field in (self.start_year, self.end_year):
+            field.setMinimum(dataset["first_year"])
+        self.start_year.setToolTip(dataset["first_tip"])
+        self.block_km.setMinimum(dataset["min_block"])
+        current = self.grid_mode.currentData()
+        self.grid_mode.blockSignals(True)
+        self.grid_mode.clear()
+        self.grid_mode.addItem(f"Original {name} grid ({dataset['cell']})", ("original", None))
+        for size in dataset["blocks"]:
+            self.grid_mode.addItem(f"{size} km grid (mean of {name} cells)", ("block", float(size)))
+        self.grid_mode.addItem(f"Custom grid size (mean of {name} cells)", ("block", None))
+        self.grid_mode.addItem(f"Rain gauges of tabs 3 and 4 (nearest {name} cell)", ("gauges", None))
+        self.grid_mode.addItem("Single station (AOI centroid)", ("single", None))
+        choices = [self.grid_mode.itemData(index) for index in range(self.grid_mode.count())]
+        # Keep the choice; a block size the dataset lacks falls back to its first block size.
+        if current in choices:
+            index = choices.index(current)
+        elif current is not None and current[0] == "block":
+            index = 1
+        else:
+            index = len(choices) - 1
+        self.grid_mode.setCurrentIndex(index)
+        self.grid_mode.blockSignals(False)
+        self.grid_mode.setToolTip(
+            f"Original: one station per {name} cell ({dataset['cell']}); km grids: mean of the cells in "
+            "each block; Rain gauges: the cell of each precipitation station checked in tab 3 or 4; "
+            "Single station: the cell at the AOI centroid (fastest)"
+        )
+        for variable in ERA5_ONLY:
+            self.variable_checks[variable].setVisible(key == "era5land")
+        self._update_grid_widgets()
+
+
+    def rain_gauges(self):
+        """Precipitation stations selected in tabs 3 and 4, for the 'Rain gauges' grid."""
+        return self.usgs_tab.rain_gauges() + self.hidroweb_tab.rain_gauges()
 
     def get_settings(self):
         mode, size = self.grid_mode.currentData()
+        dataset = self.dataset.currentData()
         source = self.aoi_source.currentData()
         layer_id = self.layer_combo.currentData()
         path = self.shapefile_edit.text().strip()
@@ -731,6 +788,7 @@ class AORCDialog(QDialog):
             },
             "bounds_crs": crs_definition(self.bounds_crs.crs()),
             "dem_path": self.dem_path.text().strip(),
+            "dataset": dataset,
             "start_year": self.start_year.value(),
             "end_year": self.end_year.value(),
             "timesteps": [
@@ -740,12 +798,15 @@ class AORCDialog(QDialog):
             "swat_pcp_step": self.swat_pcp_step.currentData(),
             "timezone": self.timezone.currentData(),
             "grid_mode": mode,
-            "gauges": self.usgs_tab.rain_gauges() if mode == "gauges" else [],
+            "gauges": self.rain_gauges() if mode == "gauges" else [],
             "block_km": size if size is not None else self.block_km.value(),
             "parallel_workers": self.parallel_workers.value(),
             "output_dir": self.output_dir.text().strip(),
             "target_crs": crs_definition(self.target_crs.crs()),
-            "variables": [key for key, check in self.variable_checks.items() if check.isChecked()],
+            "variables": [
+                key for key, check in self.variable_checks.items()
+                if check.isChecked() and (dataset == "era5land" or key not in ERA5_ONLY)
+            ],
             "write_csv": self.write_csv.isChecked(),
             "write_swat": self.write_swat.isChecked(),
             "usgs": self.usgs_tab.get_settings(),
@@ -822,7 +883,7 @@ class AORCDialog(QDialog):
         return self.et_tab.confirm_setup()
 
     def validate_aorc(self):
-        """Checks for tab 2 (AORC weather)."""
+        """Checks for tab 2 (gridded weather); ERA5-Land also needs the Earth Engine setup."""
         settings = self.get_settings()
         if settings["start_year"] > settings["end_year"]:
             return self._invalid(TAB_AORC, "Invalid year range", "The start year must be less than or equal to the end year.")
@@ -837,15 +898,17 @@ class AORCDialog(QDialog):
         if settings["write_csv"] and not settings["timesteps"]:
             return self._invalid(TAB_AORC, "No time step", "Check Daily, Hourly, or both.")
         if settings["grid_mode"] == "gauges":
-            if self.usgs_tab.inventory is None:
+            if self.usgs_tab.inventory is None and self.hidroweb_tab.inventory is None:
                 return self._invalid(
                     TAB_USGS, "Check available data first",
-                    "The rain gauges come from this tab: press 'Check available data', then run tab 2 again.",
+                    "The rain gauges come from tab 3 or 4: press 'Check available data' there, then run tab 2 again.",
                 )
             if not settings["gauges"]:
                 return self._invalid(
-                    TAB_USGS, "No rain gauges selected",
-                    "Keep a precipitation row checked (USGS or NOAA GHCN), with stations in the map selection if "
+                    TAB_USGS if self.usgs_tab.inventory is not None else TAB_HIDROWEB, "No rain gauges selected",
+                    "Keep a precipitation row checked in tab 3 or 4, with stations in the map selection if "
                     "'Only stations selected on the map' is on.",
                 )
+        if settings["dataset"] == "era5land":
+            return self.et_tab.confirm_setup("ERA5-Land data")
         return True

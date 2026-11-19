@@ -40,7 +40,13 @@ VARIABLE_LABELS = {
     "hmd": "relative humidity",
     "wnd": "wind speed",
     "eto": "reference evapotranspiration (FAO-56)",
+    "evap": "total evaporation",
+    "runoff": "runoff",
+    "soil": "soil moisture",
 }
+# Offered by ERA5-Land only (the AORC archive has no such fields).
+EXTRA_VARIABLES = ["evap", "runoff", "soil"]
+SOIL_COLUMNS = ["soil_water_l1", "soil_water_l2", "soil_water_l3", "soil_water_l4"]
 VARIABLE_SOURCES = {
     "pcp": ["APCP_surface"],
     "tmp": ["TMP_2maboveground"],
@@ -59,6 +65,9 @@ HOURLY_COLUMNS = {
     "hmd": ["rh_fraction"],
     "wnd": ["wind_ms"],
     "eto": ["eto_mm"],
+    "evap": ["evap_mm"],
+    "runoff": ["runoff_mm"],
+    "soil": SOIL_COLUMNS,
 }
 DAILY_COLUMNS = {
     "pcp": ["pcp_mm"],
@@ -67,6 +76,9 @@ DAILY_COLUMNS = {
     "hmd": ["rh_fraction"],
     "wnd": ["wind_ms"],
     "eto": ["eto_mm"],
+    "evap": ["evap_mm"],
+    "runoff": ["runoff_mm"],
+    "soil": SOIL_COLUMNS,
 }
 STEP_COLUMNS = {"daily": DAILY_COLUMNS, "hourly": HOURLY_COLUMNS}
 TIMESTEPS = ["daily", "hourly"]
@@ -130,7 +142,7 @@ OUTSIDE_GRID_MESSAGE = (
 
 
 def grid_window(dataset, geometry):
-    """Return every AORC cell whose center is inside ``geometry``."""
+    """Return every grid cell whose center is inside ``geometry``."""
     latitudes = dataset.latitude.values
     longitudes = dataset.longitude.values
     min_lon, min_lat, max_lon, max_lat = geometry.bounds
@@ -153,17 +165,17 @@ def grid_window(dataset, geometry):
     ):
         raise ValueError(OUTSIDE_GRID_MESSAGE)
     raise ValueError(
-        "No AORC grid-cell centers fall inside the AOI. Enlarge the AOI, choose "
+        "No grid-cell centers fall inside the AOI. Enlarge the AOI, choose "
         "'Single station (AOI centroid)', or check its coordinate reference system."
     )
 
 
-def centroid_window(dataset, geometry):
-    """Return the AORC cell nearest to the AOI centroid."""
+def centroid_window(dataset, geometry, step=GRID_STEP_DEG):
+    """Return the grid cell nearest to the AOI centroid."""
     latitudes = dataset.latitude.values
     longitudes = dataset.longitude.values
     centroid = geometry.centroid
-    half = GRID_STEP_DEG / 2.0
+    half = step / 2.0
     if not (
         latitudes.min() - half <= centroid.y <= latitudes.max() + half
         and longitudes.min() - half <= centroid.x <= longitudes.max() + half
@@ -176,14 +188,14 @@ def centroid_window(dataset, geometry):
     )
 
 
-def gauge_window(dataset, gauges):
-    """The AORC cell nearest to each gauge; gauges off the grid are left out.
+def gauge_window(dataset, gauges, step=GRID_STEP_DEG):
+    """The grid cell nearest to each gauge; gauges off the grid are left out.
 
     Gauges in the same cell share it, so a cell can appear more than once.
     """
     latitudes = dataset.latitude.values
     longitudes = dataset.longitude.values
-    half = GRID_STEP_DEG / 2.0
+    half = step / 2.0
     kept, lat_indices, lon_indices = [], [], []
     for gauge in gauges:
         lon, lat = float(gauge["lon"]), float(gauge["lat"])
@@ -197,13 +209,13 @@ def gauge_window(dataset, gauges):
         lon_indices.append(int(np.argmin(np.abs(longitudes - lon))))
     if not kept:
         raise ValueError(
-            "None of the rain gauges selected in the USGS Data tab lies on the AORC grid."
+            "None of the rain gauges selected in the USGS or HidroWeb Data tab lies on the grid."
         )
     return GridWindow(lat_indices, lon_indices, longitudes[lon_indices], latitudes[lat_indices]), kept
 
 
-def gauge_station_name(site_id):
-    return "aorc_" + site_stem(site_id)
+def gauge_station_name(site_id, prefix="aorc"):
+    return f"{prefix}_{site_stem(site_id)}"
 
 
 def _location_in(geometry):
@@ -217,19 +229,20 @@ def _station_name(prefix, index, count):
     return f"{prefix}{index:0{max(3, len(str(count)))}d}"
 
 
-def build_layout(dataset, geometry, grid_mode, block_km=None, gauges=None):
+def build_layout(dataset, geometry, grid_mode, block_km=None, gauges=None, step=GRID_STEP_DEG, prefix="aorc"):
     """Group AOI cells into stations.
 
-    Returns the AORC cells used, the station records, and one station index per
+    Returns the grid cells used, the station records, and one station index per
     cell (``labels``). The "gauges" mode makes one station per rain gauge
-    (``gauges``: site_id, lon, lat), on the AORC cell nearest to it.
+    (``gauges``: site_id, lon, lat), on the cell nearest to it. ``step`` is the cell
+    size in degrees and ``prefix`` starts the station names.
     """
-    half = GRID_STEP_DEG / 2.0
+    half = step / 2.0
     if grid_mode == "gauges":
-        window, kept = gauge_window(dataset, gauges or [])
+        window, kept = gauge_window(dataset, gauges or [], step)
         stations = [
             {
-                "station": gauge_station_name(gauge["site_id"]),
+                "station": gauge_station_name(gauge["site_id"], prefix),
                 "site_id": gauge["site_id"],
                 "lon": float(lon),
                 "lat": float(lat),
@@ -240,11 +253,11 @@ def build_layout(dataset, geometry, grid_mode, block_km=None, gauges=None):
         ]
         return window, stations, np.arange(len(stations))
     if grid_mode == "single":
-        window = centroid_window(dataset, geometry)
+        window = centroid_window(dataset, geometry, step)
         lon, lat = float(window.lons[0]), float(window.lats[0])
         stations = [
             {
-                "station": "aorc_centroid",
+                "station": f"{prefix}_centroid",
                 "lon": lon,
                 "lat": lat,
                 "cells": 1,
@@ -260,7 +273,7 @@ def build_layout(dataset, geometry, grid_mode, block_km=None, gauges=None):
         labels = np.arange(cell_count)
         stations = [
             {
-                "station": _station_name("aorc_", index + 1, cell_count),
+                "station": _station_name(f"{prefix}_", index + 1, cell_count),
                 "lon": float(lon),
                 "lat": float(lat),
                 "cells": 1,
@@ -284,7 +297,7 @@ def build_layout(dataset, geometry, grid_mode, block_km=None, gauges=None):
         np.column_stack((-block_rows, block_cols)), axis=0, return_inverse=True
     )
     labels = np.asarray(labels).reshape(-1)
-    full_block_cells = (block_lat / GRID_STEP_DEG) * (block_lon / GRID_STEP_DEG)
+    full_block_cells = (block_lat / step) * (block_lon / step)
     groups = _merge_small_blocks(keys, labels, SMALL_BLOCK_FRACTION * full_block_cells)
     size_text = f"{block_km:g}".replace(".", "p")
     stations = []
@@ -310,7 +323,7 @@ def build_layout(dataset, geometry, grid_mode, block_km=None, gauges=None):
             location = _location_in(area)
         stations.append(
             {
-                "station": _station_name(f"aorc_{size_text}km_", index + 1, len(groups)),
+                "station": _station_name(f"{prefix}_{size_text}km_", index + 1, len(groups)),
                 "lon": float(location.x),
                 "lat": float(location.y),
                 "cells": int(members.sum()),
@@ -745,6 +758,12 @@ def daily_from_hourly(hours, series, timezone, latitudes=None):
         daily["rh_fraction"] = _grouped_mean(series["rh_fraction"].astype("float64"), starts)
     if "wind_ms" in series:
         daily["wind_ms"] = _grouped_mean(series["wind_ms"].astype("float64"), starts)
+    for field in ("evap_mm", "runoff_mm"):
+        if field in series:
+            daily[field] = _grouped_sum(series[field].astype("float64"), starts)
+    for field in SOIL_COLUMNS:
+        if field in series:
+            daily[field] = _grouped_mean(series[field].astype("float64"), starts)
     if "ea_kpa" in series and latitudes is not None:
         daily["eto_mm"] = reference_et_daily(
             np.asarray(dates.dayofyear, dtype=float)[:, None],
@@ -904,10 +923,13 @@ class _Statistics:
 class OutputWriter:
     """Create output files once, then append one local year at a time."""
 
-    def __init__(self, stations, output_dir, settings, variables, timezone):
+    def __init__(self, stations, output_dir, settings, variables, timezone, source="NOAA/NWS AORC v1.1"):
         self.stations = stations
         self.output_dir = Path(output_dir)
         self.variables = variables
+        # SWAT+ has climate files for these only; evaporation, runoff, and soil moisture are CSV only.
+        self.swat_variables = [variable for variable in variables if variable in SWAT_EXTENSIONS]
+        self.source = source
         self.timezone = timezone
         self.write_csv = settings["write_csv"]
         self.write_swat = settings["write_swat"]
@@ -949,13 +971,13 @@ class OutputWriter:
         if self.write_swat:
             self.swat_dir.mkdir(parents=True, exist_ok=True)
             for station in self.stations:
-                for variable in self.variables:
+                for variable in self.swat_variables:
                     step = 24 if variable == "pcp" and self.swat_pcp_step == "hourly" else 0
                     with self._swat_path(station, variable).open(
                         "w", encoding="utf-8", newline="\n"
                     ) as file_obj:
                         file_obj.write(
-                            f"{station['station']}.{SWAT_EXTENSIONS[variable]}: NOAA/NWS AORC v1.1, "
+                            f"{station['station']}.{SWAT_EXTENSIONS[variable]}: {self.source}, "
                             f"{VARIABLE_LABELS[variable]}\n"
                         )
                         file_obj.write("nbyr     tstep       lat       lon      elev\n")
@@ -963,12 +985,12 @@ class OutputWriter:
                             f"{self.year_count:4d}{step:10d}{station['lat']:10.5f}"
                             f"{station['lon']:11.5f}{station['elev_m']:10.2f}\n"
                         )
-            for variable in self.variables:
+            for variable in self.swat_variables:
                 extension = SWAT_EXTENSIONS[variable]
                 with (self.swat_dir / f"{extension}.cli").open(
                     "w", encoding="utf-8", newline="\n"
                 ) as file_obj:
-                    file_obj.write(f"{extension}.cli: NOAA/NWS AORC v1.1 station files\n")
+                    file_obj.write(f"{extension}.cli: {self.source} station files\n")
                     file_obj.write("filename\n")
                     for station in self.stations:
                         file_obj.write(f"{station['station']}.{extension}\n")
@@ -1091,7 +1113,7 @@ def run_label(output_dir):
     return label or "output"
 
 
-def write_station_locations(stations, output_dir, target_crs=None):
+def write_station_locations(stations, output_dir, target_crs=None, prefix="aorc", step=GRID_STEP_DEG):
     """Write station_locations.csv and a GeoPackage in the target CRS."""
     from osgeo import ogr, osr
 
@@ -1117,7 +1139,7 @@ def write_station_locations(stations, output_dir, target_crs=None):
             "x_target_crs": [point.GetX() for point in points],
             "y_target_crs": [point.GetY() for point in points],
             "elev_m": [station["elev_m"] for station in stations],
-            "aorc_cells": [station["cells"] for station in stations],
+            f"{prefix}_cells": [station["cells"] for station in stations],
         }
     )
     if gauges:
@@ -1126,7 +1148,7 @@ def write_station_locations(stations, output_dir, target_crs=None):
     locations.to_csv(output_dir / "station_locations.csv", index=False)
 
     driver = ogr.GetDriverByName("GPKG")
-    stem = f"aorc_{run_label(output_dir)}"
+    stem = f"{prefix}_{run_label(output_dir)}"
     gpkg_path = output_dir / f"{stem}.gpkg"
     number = 1
     while gpkg_path.exists():
@@ -1146,13 +1168,13 @@ def write_station_locations(stations, output_dir, target_crs=None):
         layer.CreateField(ogr.FieldDefn("station", ogr.OFTString))
         for name in ("latitude", "longitude", "elev_m"):
             layer.CreateField(ogr.FieldDefn(name, ogr.OFTReal))
-        layer.CreateField(ogr.FieldDefn("aorc_cells", ogr.OFTInteger))
+        layer.CreateField(ogr.FieldDefn(f"{prefix}_cells", ogr.OFTInteger))
         if gauges:
             layer.CreateField(ogr.FieldDefn("site_id", ogr.OFTString))
 
     for station, point in zip(stations, points):
         area = ogr.CreateGeometryFromWkb(shapely.to_wkb(station["area"]))
-        area.Segmentize(GRID_STEP_DEG)
+        area.Segmentize(step)
         area.Transform(transform)
         area = ogr.ForceToMultiPolygon(area)
         for layer, geometry in ((station_layer, point), (area_layer, area)):
@@ -1161,7 +1183,7 @@ def write_station_locations(stations, output_dir, target_crs=None):
             feature.SetField("latitude", station["lat"])
             feature.SetField("longitude", station["lon"])
             feature.SetField("elev_m", station["elev_m"])
-            feature.SetField("aorc_cells", int(station["cells"]))
+            feature.SetField(f"{prefix}_cells", int(station["cells"]))
             if gauges:
                 feature.SetField("site_id", station.get("site_id", ""))
             feature.SetGeometry(geometry)

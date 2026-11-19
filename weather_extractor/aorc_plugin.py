@@ -25,20 +25,22 @@ from .aorc_dialog import AORCDialog
 
 # Ask for confirmation above this many stations.
 LARGE_STATION_COUNT = 200
-CELLS_PER_SQUARE_DEGREE = 120 * 120
+CELLS_PER_SQUARE_DEGREE = {"aorc": 120 * 120, "era5land": 10 * 10}
+# Name of each gridded dataset in task titles, messages, and layer names.
+GRIDDED_NAMES = {"aorc": "AORC", "era5land": "ERA5-Land"}
 KM_PER_DEGREE = 111.195
 AORC_MODULES = ["numpy", "pandas", "xarray", "zarr", "fsspec", "aiohttp", "shapely", "tzdata", "osgeo"]
 USGS_MODULES = ["numpy", "pandas", "requests", "shapely", "osgeo"]
 ET_MODULES = ["numpy", "pandas", "shapely"]
 TASK_TITLES = {
-    "aorc": "Weather Extractor: AORC weather",
+    "aorc": "Weather Extractor: gridded weather",
     "usgs_check": "Weather Extractor: check USGS data",
     "usgs": "Weather Extractor: USGS data",
     "hidroweb_check": "Weather Extractor: check HidroWeb data",
     "hidroweb": "Weather Extractor: HidroWeb data",
     "et": "Weather Extractor: evapotranspiration",
 }
-RESULT_TITLES = {"aorc": "AORC", "usgs": "USGS data", "hidroweb": "HidroWeb data", "et": "Evapotranspiration"}
+RESULT_TITLES = {"aorc": "Gridded weather", "usgs": "USGS data", "hidroweb": "HidroWeb data", "et": "Evapotranspiration"}
 CHECK_FUNCTIONS = {"usgs": "usgs_inventory", "hidroweb": "hidroweb_inventory"}
 
 
@@ -241,16 +243,31 @@ class AORCWeatherPlugin:
                 dialog.set_progress(0, "Ready to extract.")
                 return
 
-        from .aorc_processing import extract_aorc
+        if settings.get("dataset") == "era5land":
+            from .era5_processing import extract_era5
+            from .et_processing import import_earth_engine
+            from .et_tab import earth_engine_library_paths
+
+            # The Earth Engine setup was confirmed by the dialog; the project is the one of tab 5.
+            try:
+                ee = import_earth_engine(earth_engine_library_paths())
+            except Exception as exc:
+                dialog.set_running(False)
+                dialog.set_progress(0, "Ready to extract.")
+                QMessageBox.critical(self.iface.mainWindow(), "Google Earth Engine unavailable", str(exc))
+                return
+            era5_settings = dict(settings, project=settings["et"]["project"])
+
+            def function(progress, is_canceled):
+                return extract_era5(era5_settings, geometry, progress=progress, is_canceled=is_canceled, ee_module=ee)
+        else:
+            from .aorc_processing import extract_aorc
+
+            def function(progress, is_canceled):
+                return extract_aorc(settings, geometry, progress=progress, is_canceled=is_canceled)
 
         try:
-            self._launch(
-                "aorc",
-                lambda progress, is_canceled: extract_aorc(
-                    settings, geometry, progress=progress, is_canceled=is_canceled
-                ),
-                dialog.set_progress,
-            )
+            self._launch("aorc", function, dialog.set_progress)
         except Exception:
             dialog.set_running(False)
             raise
@@ -355,7 +372,7 @@ class AORCWeatherPlugin:
         if mode == "gauges":
             return len(settings["gauges"])
         if mode == "original":
-            return int(geometry.area * CELLS_PER_SQUARE_DEGREE)
+            return int(geometry.area * CELLS_PER_SQUARE_DEGREE[settings.get("dataset", "aorc")])
         cos_lat = max(math.cos(math.radians(geometry.centroid.y)), 0.01)
         area_km2 = geometry.area * KM_PER_DEGREE**2 * cos_lat
         return int(math.ceil(area_km2 / float(settings["block_km"]) ** 2))
@@ -439,8 +456,9 @@ class AORCWeatherPlugin:
         dialog = self.dialog
         gpkg = str(result["gpkg"])
         label = result["label"]
-        areas = QgsVectorLayer(f"{gpkg}|layername=station_areas", f"AORC station areas ({label})", "ogr")
-        stations = QgsVectorLayer(f"{gpkg}|layername=stations", f"AORC weather stations ({label})", "ogr")
+        name = GRIDDED_NAMES[result.get("dataset", "aorc")]
+        areas = QgsVectorLayer(f"{gpkg}|layername=station_areas", f"{name} station areas ({label})", "ogr")
+        stations = QgsVectorLayer(f"{gpkg}|layername=stations", f"{name} weather stations ({label})", "ogr")
         if not stations.isValid():
             if dialog is not None:
                 dialog.set_progress(100, "Extraction complete, but the station point layer could not be loaded.")
@@ -452,7 +470,7 @@ class AORCWeatherPlugin:
             return
         project = QgsProject.instance()
         # Keep each run's layers together in a group named after its folder.
-        group = project.layerTreeRoot().insertGroup(0, f"AORC {label}")
+        group = project.layerTreeRoot().insertGroup(0, f"{name} {label}")
         project.addMapLayer(stations, False)
         group.addLayer(stations)
         if areas.isValid():
@@ -468,7 +486,7 @@ class AORCWeatherPlugin:
         if dialog is not None:
             dialog.set_progress(100, f"Complete: {result['station_count']} station point(s) loaded into QGIS.")
         self._completion_message(
-            "AORC extraction complete",
+            f"{name} extraction complete",
             f"Created weather outputs for {result['station_count']} station(s).\n\n"
             f"Output folder: {result['output_dir']}\n"
             f"Statistics: {result['summary']}\n"

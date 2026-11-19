@@ -137,6 +137,15 @@ class Inventory:
             visible[self.sites[entry["site_id"]]["layer"]].add(entry["site_id"])
         return visible
 
+    def rain_gauges(self, selection, site_ids=None):
+        """Stations with the precipitation row selected: site_id, name, lon, lat."""
+        chosen = {e["site_id"] for e in self.selected_entries(selection, site_ids) if e["row"] == "precipitation"}
+        return [
+            {"site_id": site_id, "name": self.sites[site_id]["name"],
+             "lon": self.sites[site_id]["lon"], "lat": self.sites[site_id]["lat"]}
+            for site_id in sorted(chosen)
+        ]
+
     def layer_sites(self, layer):
         return sorted(site_id for site_id, site in self.sites.items() if site["layer"] == layer)
 

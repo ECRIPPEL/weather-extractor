@@ -1,8 +1,8 @@
 # Weather Extractor for QGIS
 
-Weather Extractor is a QGIS plugin for downloading hydroclimatic data for teaching and research. Version 2.2.0 includes:
+Weather Extractor is a QGIS plugin for downloading hydroclimatic data for teaching and research. Version 2.3.0 includes:
 
-- **Gridded data (NOAA AORC):** hourly gridded weather (precipitation, temperature, solar radiation, humidity, wind) and FAO-56 reference evapotranspiration for the contiguous United States, from February 1979 to the latest complete year, as daily and/or hourly series.
+- **Gridded data (NOAA AORC or ERA5-Land):** hourly gridded weather (precipitation, temperature, solar radiation, humidity, wind) and FAO-56 reference evapotranspiration, as daily and/or hourly series: NOAA AORC for the contiguous United States (~800 m, from February 1979) or ECMWF ERA5-Land worldwide (~9 km, from 1950, through Google Earth Engine, also with evaporation, runoff, and soil moisture).
 - **Observed data (USGS, EPA, and NOAA):** USGS water quantity (streamflow, gage height, groundwater, precipitation) and water quality (sensor series and samples), other agencies' samples from the Water Quality Portal, and NOAA rain gauges (daily GHCN-Daily and hourly GHCNh).
 - **HidroWeb data (ANA, Brazil):** daily discharge, water level, and rainfall of the Brazilian national hydrometeorological network.
 - **Remote sensing data:** monthly actual ET from OpenET and MODIS, averaged over the area of interest, through Google Earth Engine (e.g., to close a water balance).
@@ -12,26 +12,33 @@ Outputs are CSV tables, GeoPackage station layers, and optional SWAT+ climate fi
 ## Install
 
 1. In QGIS 3.40 or later, open **Plugins > Manage and Install Plugins... > Install from ZIP**.
-2. Select `Weather_Extractor-2.1.0-win.zip` and choose **Install Plugin**.
+2. Select `Weather_Extractor-2.3.0-win.zip` and choose **Install Plugin**.
 3. Open **Plugins > Weather Extractor > Open Weather Extractor**.
 
 The Windows ZIP bundles its Python libraries; no pip installation is needed. Internet access is required.
 
-The Remote Sensing tab also needs the **Google Earth Engine** QGIS plugin and a Google Cloud project [registered for Earth Engine](https://code.earthengine.google.com/register).
+ERA5-Land (tab 2) and the Remote Sensing tab also need the **Google Earth Engine** QGIS plugin and a Google Cloud project [registered for Earth Engine](https://code.earthengine.google.com/register).
 
 ## Workflow
 
-**Tab 1. Setup (required).** Load a polygon file (shapefile, GeoPackage, GeoJSON), choose a project layer, draw a polygon on the map, or enter bounding coordinates in any CRS. Set the output folder, target CRS, and timezone (local standard time, no daylight saving time; used for the hours and days of tabs 2 and 3). An elevation raster (DEM) is optional and gives AORC station elevations. **Parallel processing** sets how many tasks run at once in every tab: AORC years and the web requests of the observed-data and remote sensing tabs (for example, 20 on a 20-core computer). AORC uses more memory with more parallel years.
+**Tab 1. Setup (required).** Load a polygon file (shapefile, GeoPackage, GeoJSON), choose a project layer, draw a polygon on the map, or enter bounding coordinates in any CRS. Set the output folder, target CRS, and timezone (local standard time, no daylight saving time; used for the hours and days of tabs 2 and 3). An elevation raster (DEM) is optional and gives the elevations of the gridded stations. **Parallel processing** sets how many tasks run at once in every tab: AORC years, ERA5-Land requests, and the web requests of the observed-data and remote sensing tabs (for example, 20 on a 20-core computer). AORC uses more memory with more parallel years.
 
-**Tab 2. Gridded Data (NOAA AORC).** Choose:
+**Tab 2. Gridded Data (NOAA AORC or ERA5-Land).** Choose:
 
+- Dataset: AORC (contiguous United States, ~800 m, from 1979) or ERA5-Land (global land, 0.1°, ~9 km, from 1950)
 - Period, and the CSV time step: daily, hourly, or both (both come from the same hourly values, e.g. to compare them)
-- Grid: original AORC grid (~800 m), 5/10/50 km or custom blocks (mean of AORC cells), the AORC cell of each rain gauge checked in tab 3, or a single station at the AOI centroid
-- Climate variables, including reference ET (ETo), CSV and/or SWAT+ files, and the SWAT+ precipitation time step (daily or hourly)
+- Grid: the original grid of the dataset, 5/10/50 km (AORC) or 50 km (ERA5-Land) or custom blocks (mean of the cells), the cell of each rain gauge checked in tabs 3 and 4, or a single station at the AOI centroid
+- Climate variables, CSV and/or SWAT+ files, and the SWAT+ precipitation time step (daily or hourly)
 
-Press **Run**. Years are processed in parallel (Parallel processing, tab 1).
+| Variable | AORC | ERA5-Land | SWAT+ file |
+|---|:-:|:-:|:-:|
+| Precipitation, temperature, solar radiation, humidity, wind | x | x | x |
+| Reference ET (FAO-56) | x | x | x |
+| Evaporation, runoff, soil moisture (4 layers) | | x | |
 
-For the rain gauge grid, first press **Check available data** in tab 3 and keep a precipitation row checked (USGS or NOAA GHCN). Each AORC station is named after its gauge (`aorc_ghcn_usw00013894` for `GHCN-USW00013894`) and its files carry the gauge `site_id`, so AORC and observed series can be joined directly.
+Press **Run**. AORC years and ERA5-Land requests run in parallel (Parallel processing, tab 1). ERA5-Land is read from Google Earth Engine with the project of tab 5; if the setup is incomplete, **Run** lists the missing steps (as in tab 5).
+
+For the rain gauge grid, first press **Check available data** in tab 3 or 4 and keep a precipitation row checked (USGS, NOAA GHCN, or ANA). Each station is named after its gauge (`aorc_ghcn_usw00013894` for `GHCN-USW00013894`, `era5_ana_2953001` for `ANA-2953001`) and its files carry the gauge `site_id`, so gridded and observed series can be joined directly.
 
 **Tab 3. USGS Data (USGS, EPA, and NOAA).**
 
@@ -86,7 +93,7 @@ If the Google Earth Engine setup is incomplete, **Run** lists the missing steps:
 
 ## Outputs
 
-**AORC** (output folder): one CSV per station and time step (`<station>_daily.csv`, `<station>_hourly.csv`), `swatplus_weather/` (optional), `weather_statistics.csv`, `station_locations.csv`, and `aorc_<folder>.gpkg` with station points and areas.
+**Gridded data** (output folder): one CSV per station and time step (`<station>_daily.csv`, `<station>_hourly.csv`), `swatplus_weather/` (optional), `weather_statistics.csv`, `station_locations.csv`, and `aorc_<folder>.gpkg` (`era5_<folder>.gpkg` for ERA5-Land) with station points and areas. ERA5-Land files can also have `evap_mm`, `runoff_mm`, and `soil_water_l1` to `soil_water_l4`.
 
 **Observed data** (`usgs_water_data/`): `quantity/` and `quality/` folders with daily series (`daily/`) and USGS sub-daily sensor series (`continuous/`) per station (NOAA rain gauges as `quantity/daily/ghcnd_<station>_daily.csv` and `quantity/hourly/ghcnh_<station>_hourly.csv`), `field_measurements.csv`, `annual_peaks.csv`, `channel_measurements.csv` (with mean depth = area / width), and `samples.csv`; `usgs_<folder>.gpkg` with quantity stations (triangles), channel geometry stations (dashes), and quality points (circles), with optional shapefiles; and `available_data.csv`. The `site_id` column links layers and tables.
 
@@ -99,8 +106,9 @@ Each run also writes a `README.txt` with its settings and conventions, and a `wa
 ## Notes
 
 - AORC precipitation is assigned to the hour before its timestamp; daily values cover local days. Hourly SWAT+ precipitation uses `tstep` 24; other SWAT+ variables stay daily. Hourly rows of AORC and GHCNh files are labeled by the beginning of the hour, in UTC and local standard time.
-- Reference ET is calculated with the FAO-56 Penman-Monteith equation for grass (Allen et al., 1998) from AORC temperature, humidity, pressure, solar radiation, and wind, on the same grid as the other variables (daily Eq. 6; hourly Eq. 53). SWAT+ files `*.pet` and `pet.cli` hold daily ETo; set the SWAT+ PET method to read values from file.
-- AORC data are read in archive chunks of about 1° × 2°; large areas on the original grid take long. Start with one year and a small area.
+- ERA5-Land precipitation, solar radiation, evaporation, and runoff are totals over the hour ending at the image time, assigned to that hour as for AORC. Evaporation (total evaporation, with transpiration) is written positive for water leaving the surface; soil moisture is volumetric water (m³/m³) of the layers 0-7, 7-28, 28-100, and 100-289 cm. ERA5-Land covers land only: cells over the sea are blank (-99 in SWAT+ files). The latest days are published about 5 days late.
+- Reference ET is calculated with the FAO-56 Penman-Monteith equation for grass (Allen et al., 1998) from the temperature, humidity, pressure, solar radiation, and wind of the dataset (ERA5-Land humidity from the 2 m dewpoint), on the same grid as the other variables (daily Eq. 6; hourly Eq. 53). SWAT+ files `*.pet` and `pet.cli` hold daily ETo; set the SWAT+ PET method to read values from file.
+- AORC data are read in archive chunks of about 1° × 2°; large areas on the original grid take long. Start with one year and a small area. ERA5-Land values are read once per cell, in Earth Engine requests of up to about 800,000 values.
 - Daily CSV files of the USGS Data and HidroWeb Data tabs list every day of the period, and hourly GHCNh files every hour; -99 marks a day or hour without a value.
 - USGS values include their approval status; provisional values may be revised.
 - GHCN-Daily precipitation is the 24-hour total ending at the observation time of each gauge; COOP and CoCoRaHS gauges are usually read in the morning, so their day differs from a calendar day. NOAA measurement, quality, and source flags are kept.
@@ -114,6 +122,8 @@ Each run also writes a `README.txt` with its settings and conventions, and a `wa
 ## Data sources and citation
 
 - NOAA. NOAA Analysis of Record for Calibration (AORC) Dataset. Accessed YYYY-MM-DD from https://registry.opendata.aws/noaa-nws-aorc/.
+- Muñoz Sabater, J. (2019). ERA5-Land hourly data from 1950 to present. Copernicus Climate Change Service (C3S) Climate Data Store (CDS). https://doi.org/10.24381/cds.e2161bac
+- Muñoz-Sabater, J., et al. (2021). ERA5-Land: a state-of-the-art global reanalysis dataset for land applications. *Earth System Science Data, 13*, 4349–4383. https://doi.org/10.5194/essd-13-4349-2021 (ERA5-Land outputs: "Generated using Copernicus Climate Change Service information [year]")
 - Allen, R.G., Pereira, L.S., Raes, D., & Smith, M. (1998). *Crop evapotranspiration: Guidelines for computing crop water requirements.* FAO Irrigation and Drainage Paper 56. FAO, Rome.
 - Fall, G., et al. (2023). The Office of Water Prediction's Analysis of Record for Calibration, version 1.1: Dataset description and precipitation evaluation. *JAWRA, 59*(6), 1246–1272. https://doi.org/10.1111/1752-1688.13143
 - U.S. Geological Survey, Water Data for the Nation, accessed YYYY-MM-DD, at https://waterdata.usgs.gov/.
@@ -124,7 +134,7 @@ Each run also writes a `README.txt` with its settings and conventions, and a `wa
 - Melton, F.S., et al. (2022). OpenET: Filling a critical data gap in water management for the western United States. *JAWRA, 58*(6), 971–994. https://doi.org/10.1111/1752-1688.12956 (OpenET data: CC-BY-4.0)
 - Running, S., Mu, Q., Zhao, M., & Moreno, A. (2021). MODIS/Terra Net Evapotranspiration Gap-Filled 8-Day L4 Global 500m SIN Grid V061. NASA LP DAAC. https://doi.org/10.5067/MODIS/MOD16A2GF.061
 
-Outputs are derived data, not original NOAA, USGS, ANA, OpenET, or NASA data. This plugin is an independent tool, not affiliated with or endorsed by these agencies or by Google.
+Outputs are derived data, not original NOAA, ECMWF, USGS, ANA, OpenET, or NASA data. This plugin is an independent tool, not affiliated with or endorsed by these agencies or by Google.
 
 ## License
 

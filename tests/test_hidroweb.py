@@ -150,6 +150,14 @@ class InventoryTests(unittest.TestCase):
         site = inventory.sites["ANA-85400000"]
         self.assertEqual((site["lon"], site["lat"], site["drainage_km2"], site["org"]), (-53.7, -29.65, 1000.0, "SGB-CPRM"))
 
+    def test_rain_gauges_for_the_gridded_tab(self):
+        selection = {("precipitation", "daily"), ("discharge", "daily")}
+        gauges = self.inventory.rain_gauges(selection)
+        self.assertEqual([gauge["site_id"] for gauge in gauges], ["ANA-2953001", "ANA-2953005"])
+        self.assertEqual(set(gauges[0]), {"site_id", "name", "lon", "lat"})
+        self.assertEqual(self.inventory.rain_gauges(selection, {"ANA-2953005"})[0]["site_id"], "ANA-2953005")
+        self.assertEqual(self.inventory.rain_gauges({("discharge", "daily")}), [], "no precipitation row checked")
+
     def test_failed_code_ranges_are_split(self):
         client = BusyAna()
         inventory = check_availability(SETTINGS, AOI, client=client)

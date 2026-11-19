@@ -263,6 +263,13 @@ class HidrowebTab(QWidget):
         )
         self.selectionChanged.emit()
 
+    def rain_gauges(self):
+        """Rain gauges the current selection would download (for the Gridded Data tab)."""
+        if self.inventory is None:
+            return []
+        site_ids = self.get_settings()["site_ids"]
+        return self.inventory.rain_gauges(set(self.selection()), set(site_ids) if site_ids is not None else None)
+
     def keep_downloaded(self, keys):
         """After a run, the table and the map keep only the datasets that returned data."""
         if self.inventory is None:

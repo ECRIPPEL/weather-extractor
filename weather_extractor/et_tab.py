@@ -117,7 +117,7 @@ class EtTab(QWidget):
         """(installed, signed in, project entered), checked locally without network."""
         return gee_plugin_installed(), has_credentials(), bool(self.project.text().strip())
 
-    def confirm_setup(self):
+    def confirm_setup(self, purpose="Evapotranspiration data"):
         """Explain the Google Earth Engine steps still missing; True when all are done."""
         status = self.setup_status()
         if all(status):
@@ -128,7 +128,7 @@ class EtTab(QWidget):
         message = QMessageBox(
             QMessageBox.Information,
             "Google Earth Engine setup",
-            "Evapotranspiration data come from Google Earth Engine. "
+            f"{purpose} come from Google Earth Engine. "
             "Complete the steps marked ✗, then press Run again.\n\n"
             f"{mark[installed]}  1. Install and enable the 'Google Earth Engine' plugin\n"
             "      (Plugins > Manage and Install Plugins).\n\n"
@@ -136,8 +136,8 @@ class EtTab(QWidget):
             "      (Plugins > Google Earth Engine > Sign-in).\n\n"
             f"{mark[has_project]}  3. Select your Google Cloud project in the plugin\n"
             "      (Plugins > Google Earth Engine > Set Project).\n"
-            "      Then paste its ID in this tab's\n"
-            "      'Google Earth Engine project' box.\n\n"
+            "      Then paste its ID in the 'Google Earth Engine\n"
+            "      project' box of tab 5.\n\n"
             f"No Earth Engine access yet? Register a project at {REGISTER_URL}",
             QMessageBox.Ok,
             self,

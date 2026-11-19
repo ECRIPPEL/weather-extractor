@@ -1,15 +1,15 @@
 [general]
 name=Weather Extractor
 qgisMinimumVersion=3.40
-description=Download hydroclimatic data for an area of interest: AORC gridded weather, USGS, EPA, NOAA, and ANA HidroWeb observed data, and OpenET/MODIS evapotranspiration.
-version=2.2.0
+description=Download hydroclimatic data for an area of interest: AORC and ERA5-Land gridded weather, USGS, EPA, NOAA, and ANA HidroWeb observed data, and OpenET/MODIS evapotranspiration.
+version=2.3.0
 author=Weather Extractor contributors
-about=Windows bundle for QGIS 3.40 or later. For an area of interest, the plugin downloads NOAA AORC gridded weather (contiguous United States; hourly, ~800 m, from 1979; daily or hourly series with FAO-56 reference ET), USGS, EPA Water Quality Portal, and NOAA GHCN observed data (streamflow, water level, groundwater, rainfall, water quality), ANA HidroWeb daily discharge, water level, and rainfall (Brazil), and monthly OpenET and MODIS evapotranspiration through Google Earth Engine. Each data tab checks what exists in the area and period before downloading and previews the stations on the map. Outputs are CSV tables, GeoPackage station layers, and optional SWAT+ climate files. The plugin is not affiliated with or endorsed by NOAA, USGS, EPA, ANA, or Google.
+about=Windows bundle for QGIS 3.40 or later. For an area of interest, the plugin downloads NOAA AORC (contiguous United States; hourly, ~800 m, from 1979) or ECMWF ERA5-Land gridded weather (global; hourly, ~9 km, from 1950, also evaporation, runoff, and soil moisture, through Google Earth Engine) as daily or hourly series with FAO-56 reference ET, USGS, EPA Water Quality Portal, and NOAA GHCN observed data (streamflow, water level, groundwater, rainfall, water quality), ANA HidroWeb daily discharge, water level, and rainfall (Brazil), and monthly OpenET and MODIS evapotranspiration through Google Earth Engine. Each data tab checks what exists in the area and period before downloading and previews the stations on the map. Outputs are CSV tables, GeoPackage station layers, and optional SWAT+ climate files. The plugin is not affiliated with or endorsed by NOAA, ECMWF, USGS, EPA, ANA, or Google.
 license=MIT
 category=Vector
-tags=weather,aorc,climate,usgs,ana,hidroweb,brazil,streamflow,precipitation,ghcn,water quality,evapotranspiration,openet,modis,earth engine,swat,hydrology
+tags=weather,aorc,era5,era5-land,reanalysis,climate,usgs,ana,hidroweb,brazil,streamflow,precipitation,ghcn,water quality,evapotranspiration,openet,modis,earth engine,swat,hydrology
 repository=https://github.com/ECRIPPEL/weather-extractor
 icon=icon.svg
 experimental=True
 deprecated=False
-changelog=2.2.0 - 2026-11-11
+changelog=2.3.0 - 2026-11-19
