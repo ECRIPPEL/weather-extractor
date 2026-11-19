@@ -1,13 +1,10 @@
-import sys
-from pathlib import Path
+from .dependencies import add_to_path
 
-
-_VENDOR_DIR = str(Path(__file__).resolve().parent / "vendor")
-if Path(_VENDOR_DIR).is_dir() and _VENDOR_DIR not in sys.path:
-	sys.path.append(_VENDOR_DIR)
+# The AORC libraries: vendor/ (full ZIP, tests) or the ones installed on first use.
+add_to_path()
 
 
 def classFactory(iface):
-	from .aorc_plugin import AORCWeatherPlugin
+    from .aorc_plugin import AORCWeatherPlugin
 
-	return AORCWeatherPlugin(iface)
+    return AORCWeatherPlugin(iface)

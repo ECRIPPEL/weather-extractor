@@ -1,155 +1,97 @@
-# Weather Extractor for QGIS
+# Weather Extractor
 
-Weather Extractor is a QGIS plugin for downloading hydroclimatic data for teaching and research. Version 2.3.0 includes:
+**Version 2.4.0**
 
-- **Gridded data (NOAA AORC or ERA5-Land):** hourly gridded weather (precipitation, temperature, solar radiation, humidity, wind) and FAO-56 reference evapotranspiration, as daily and/or hourly series: NOAA AORC for the contiguous United States (~800 m, from February 1979) or ECMWF ERA5-Land worldwide (~9 km, from 1950, through Google Earth Engine, also with evaporation, runoff, and soil moisture).
-- **Observed data (USGS, EPA, and NOAA):** USGS water quantity (streamflow, gage height, groundwater, precipitation) and water quality (sensor series and samples), other agencies' samples from the Water Quality Portal, and NOAA rain gauges (daily GHCN-Daily and hourly GHCNh).
-- **HidroWeb data (ANA, Brazil):** daily discharge, water level, and rainfall of the Brazilian national hydrometeorological network.
-- **Remote sensing data:** monthly actual ET from OpenET and MODIS, averaged over the area of interest, through Google Earth Engine (e.g., to close a water balance).
+Weather Extractor is a QGIS plugin that downloads hydroclimatic data for an area of interest: gridded weather (NOAA AORC and ERA5-Land), observed data from USGS, EPA, NOAA and ANA, and evapotranspiration from OpenET and MODIS. Before downloading, each tab checks what exists in the area and period and previews the stations on the map. Outputs are CSV tables, GeoPackage station layers and optional SWAT+ climate files.
 
-Outputs are CSV tables, GeoPackage station layers, and optional SWAT+ climate files.
+![Overview](docs/images/overview.png)
 
-## Install
-
-1. In QGIS 3.40 or later, open **Plugins > Manage and Install Plugins... > Install from ZIP**.
-2. Select `Weather_Extractor-2.3.0-win.zip` and choose **Install Plugin**.
-3. Open **Plugins > Weather Extractor > Open Weather Extractor**.
-
-The Windows ZIP bundles its Python libraries; no pip installation is needed. Internet access is required.
-
-ERA5-Land (tab 2) and the Remote Sensing tab also need the **Google Earth Engine** QGIS plugin and a Google Cloud project [registered for Earth Engine](https://code.earthengine.google.com/register).
+*Fig. 01 - One area of interest with the stations of each source: AORC cells (~800 m, grey), ERA5-Land cells (~9 km, blue squares with yellow centres) and USGS stations (triangles: water quantity; green circles: water quality).*
 
 ## Workflow
 
-**Tab 1. Setup (required).** Load a polygon file (shapefile, GeoPackage, GeoJSON), choose a project layer, draw a polygon on the map, or enter bounding coordinates in any CRS. Set the output folder, target CRS, and timezone (local standard time, no daylight saving time; used for the hours and days of tabs 2 and 3). An elevation raster (DEM) is optional and gives the elevations of the gridded stations. **Parallel processing** sets how many tasks run at once in every tab: AORC years, ERA5-Land requests, and the web requests of the observed-data and remote sensing tabs (for example, 20 on a 20-core computer). AORC uses more memory with more parallel years.
+Define the area of interest in tab 1, then download from any data tab; each one has its own *Run* button. Every tab runs its tasks in parallel, as set in *Parallel processing*.
 
-**Tab 2. Gridded Data (NOAA AORC or ERA5-Land).** Choose:
+### 1. Setup
 
-- Dataset: AORC (contiguous United States, ~800 m, from 1979) or ERA5-Land (global land, 0.1°, ~9 km, from 1950)
-- Period, and the CSV time step: daily, hourly, or both (both come from the same hourly values, e.g. to compare them)
-- Grid: the original grid of the dataset, 5/10/50 km (AORC) or 50 km (ERA5-Land) or custom blocks (mean of the cells), the cell of each rain gauge checked in tabs 3 and 4, or a single station at the AOI centroid
-- Climate variables, CSV and/or SWAT+ files, and the SWAT+ precipitation time step (daily or hourly)
+Load the area of interest from a polygon file or a project layer, draw it on the map or type its bounds. Choose the output folder, the CRS of the output layers and the timezone (local standard time, without daylight saving time). An elevation raster is optional and gives the elevation of the gridded stations.
 
-| Variable | AORC | ERA5-Land | SWAT+ file |
-|---|:-:|:-:|:-:|
-| Precipitation, temperature, solar radiation, humidity, wind | x | x | x |
-| Reference ET (FAO-56) | x | x | x |
-| Evaporation, runoff, soil moisture (4 layers) | | x | |
+<img src="docs/images/setup.png" width="460" alt="Setup">
 
-Press **Run**. AORC years and ERA5-Land requests run in parallel (Parallel processing, tab 1). ERA5-Land is read from Google Earth Engine with the project of tab 5; if the setup is incomplete, **Run** lists the missing steps (as in tab 5).
+*Fig. 02 - Setup: area of interest, output folder, timezone and parallel processing.*
 
-For the rain gauge grid, first press **Check available data** in tab 3 or 4 and keep a precipitation row checked (USGS, NOAA GHCN, or ANA). Each station is named after its gauge (`aorc_ghcn_usw00013894` for `GHCN-USW00013894`, `era5_ana_2953001` for `ANA-2953001`) and its files carry the gauge `site_id`, so gridded and observed series can be joined directly.
+### 2. Gridded Data
 
-**Tab 3. USGS Data (USGS, EPA, and NOAA).**
+Choose the dataset: NOAA AORC (contiguous United States, ~800 m, from 1979) or ERA5-Land (global land, ~9 km, from 1950, through Google Earth Engine). Both give hourly precipitation, temperature, solar radiation, humidity and wind, plus FAO-56 reference ET, as daily and/or hourly series; ERA5-Land also gives evaporation, runoff and soil moisture. Stations follow the original grid, blocks of a chosen size, the rain gauges checked in tabs 3 and 4 (to compare gridded and observed rainfall) or a single cell at the AOI centroid.
 
-1. Set the period, an optional search margin (km around the area, e.g. to include a basin outlet), and an optional free API key ([sign up](https://api.waterdata.usgs.gov/signup/)) for faster downloads.
-2. Press **Check available data**. Only metadata are read; the tables then show how many stations have each dataset, and the stations appear on the map.
-3. Uncheck what you do not need (the box next to a variable switches its whole row); the map updates. Optionally, select stations on the map and check **Only stations selected on the map**.
-4. Press **Run**.
+![Gridded Data](docs/images/gridded_data.png)
 
-| Water quantity | Daily | Sub-daily | Field | Peaks |
-|---|:-:|:-:|:-:|:-:|
-| Streamflow | x | x | x | x |
-| Streamflow, tide-filtered | x | x | | |
-| Gage height | x | x | x | x |
-| Estuary / ocean level | x | x | | |
-| Groundwater depth below land surface | x | x | x | |
-| Precipitation (USGS) | x | x | | |
-| Precipitation (NOAA GHCN: daily from COOP, CoCoRaHS, airports; hourly GHCNh from airports, USCRN, COOP recording gauges) | x | x | | |
-| Water velocity | x | x | x | |
-| Channel geometry (width, area, mean velocity, bed material) | | | x | |
+*Fig. 03 - Gridded Data: the dataset selector.*
 
-| Water quality | Sensor daily | Sensor sub-daily | Samples |
-|---|:-:|:-:|:-:|
-| Temperature, conductance, salinity, dissolved oxygen, pH, turbidity | x | x | x |
-| Nutrients, sediment, microbiological, major ions, metals, pesticides, other organics | | | x |
+![ERA5-Land](docs/images/era5_land.png)
 
-Sub-daily means the USGS sensor values at their original interval (usually 15 min, sometimes 5 to 60 min), and hourly totals for NOAA GHCNh.
+*Fig. 04 - ERA5-Land on its original grid: one station per ~9 km cell, with evaporation, runoff and soil moisture available.*
 
-Not every dataset exists for every variable or place; the check shows what is available.
+### 3. USGS Data
 
-**Tab 4. HidroWeb Data (ANA, Brazil).** Same steps as tab 3: set the period and an optional search margin, press **Check available data**, uncheck what you do not need (optionally only the stations selected on the map), and press **Run**.
+USGS streamflow, gage height, groundwater, precipitation and water quality (sensor series and samples), Water Quality Portal samples of other agencies, and NOAA rain gauges (GHCN-Daily and hourly GHCNh). *Check available data* reads only the metadata: the table counts the stations of each dataset in the area and period, and the map previews them. Uncheck what you do not need, or keep only the stations selected on the map, and press *Run*. Stations that return no data are removed from the map. A free [USGS API key](https://api.waterdata.usgs.gov/signup/) makes the downloads faster.
 
-| Variable | Daily | Unit |
-|---|:-:|:-:|
-| Discharge (vazão) | x | m³/s |
-| Water level (cota) | x | cm |
-| Precipitation (chuva) | x | mm |
+![USGS Data](docs/images/usgs_data.png)
 
-Only stations whose inventory period overlaps the requested period are listed. That period is not always current for stations of other agencies (state agencies, utilities, universities), so some listed stations return no values; the run README lists them. Data come from the public ANA web service (ServiceANA). If you have a HidroWebService login (request it from hidro@ana.gov.br; the user is your CPF or CNPJ), type it with the password ANA sent in the **ANA login** boxes and the downloads use HidroWebService instead; the password is not saved.
+*Fig. 05 - USGS Data: the datasets available in the area, with their stations on the map.*
 
-**Tab 5. Remote Sensing (OpenET and MODIS).** Choose the years and OpenET and/or MODIS, then press **Run**. The result is one monthly series: the mean over the whole area of interest.
+### 4. HidroWeb Data
 
-| Product | Variables | Resolution | Period |
-|---|---|---|---|
-| OpenET Ensemble v2.1 | actual ET, model range | monthly, 30 m | from 2016 (CONUS); before 2016 v2.0, western US only |
-| MODIS MOD16A2GF v061 | actual and potential ET | 8-day, 500 m | from 2000 (global) |
+Daily discharge, water level and rainfall of the Brazilian national network (ANA), with the same steps as tab 3. Each series file holds only the date and the value; `hidroweb_index.csv` holds the station details. Downloads use the public ANA service (about one series per second), or HidroWebService when you type your ANA login; the password is not saved.
 
-If the Google Earth Engine setup is incomplete, **Run** lists the missing steps:
+### 5. Remote Sensing
 
-1. Install and enable the Google Earth Engine plugin (**Plugins > Manage and Install Plugins**).
-2. Sign in with your Google account (**Plugins > Google Earth Engine > Sign-in**).
-3. Select your Cloud project (**Plugins > Google Earth Engine > Set Project**) and paste its ID in the **Google Earth Engine project** box.
+Monthly actual ET from OpenET (CONUS, 30 m, from 2016) and MODIS (global, 500 m, from 2000), averaged over the area of interest through Google Earth Engine, for example to close a water balance.
 
 ## Outputs
 
-**Gridded data** (output folder): one CSV per station and time step (`<station>_daily.csv`, `<station>_hourly.csv`), `swatplus_weather/` (optional), `weather_statistics.csv`, `station_locations.csv`, and `aorc_<folder>.gpkg` (`era5_<folder>.gpkg` for ERA5-Land) with station points and areas. ERA5-Land files can also have `evap_mm`, `runoff_mm`, and `soil_water_l1` to `soil_water_l4`.
+Each tab writes to the output folder: gridded station series (`<station>_daily.csv`, `<station>_hourly.csv`, optional `swatplus_weather/`), `usgs_water_data/`, `hidroweb_data/` and `evapotranspiration/`. Each run also writes a GeoPackage with its stations, a `README.txt` with its settings, units and conventions, and a `warnings.txt` when needed. Observed daily series list every day of the period, with -99 where there is no value. The layers load into QGIS in a group named after the output folder, and the `site_id` column links layers and tables.
 
-**Observed data** (`usgs_water_data/`): `quantity/` and `quality/` folders with daily series (`daily/`) and USGS sub-daily sensor series (`continuous/`) per station (NOAA rain gauges as `quantity/daily/ghcnd_<station>_daily.csv` and `quantity/hourly/ghcnh_<station>_hourly.csv`), `field_measurements.csv`, `annual_peaks.csv`, `channel_measurements.csv` (with mean depth = area / width), and `samples.csv`; `usgs_<folder>.gpkg` with quantity stations (triangles), channel geometry stations (dashes), and quality points (circles), with optional shapefiles; and `available_data.csv`. The `site_id` column links layers and tables.
+## Installation
 
-**HidroWeb data** (`hidroweb_data/`): `daily/ana_<code>_<variable>.csv` with only the date and the daily value (`discharge_m3s`, `stage_cm`, `precipitation_mm`); `hidroweb_index.csv` with one row per station (code, name, type, latitude, longitude, altitude, drainage area, river, municipality, state, sub-basin, operator, days with values per variable, first and last day); `hidroweb_<folder>.gpkg` with streamflow stations (triangles) and rain gauges (circles), with optional shapefiles; and `available_data.csv`.
+In QGIS, open *Plugins > Manage and Install Plugins*, search for **Weather Extractor** and install it. You can also download `Weather_Extractor-2.4.0.zip` from [Releases](https://github.com/ECRIPPEL/weather-extractor/releases) and use *Install from ZIP*.
 
-**Evapotranspiration** (`evapotranspiration/`): `et_monthly.csv` (mm/month, with the fraction of the area with valid pixels) and `et_annual.csv` (totals for complete years).
+The first time you choose AORC, the plugin installs its Python libraries (xarray, zarr and others, about 3 MB) with pip into your QGIS profile; this takes about a minute and happens once. ERA5-Land and the Remote Sensing tab need the [Google Earth Engine plugin](https://plugins.qgis.org/plugins/ee_plugin/) and a Cloud project [registered for Earth Engine](https://code.earthengine.google.com/register). If a step is missing, *Run* lists it.
 
-Each run also writes a `README.txt` with its settings and conventions, and a `warnings.txt` when there are warnings. Layers are loaded into QGIS in a group named after the output folder.
+## Compatibility
 
-## Notes
+- QGIS 3.40 or later (tested on Windows).
+- AORC, USGS and EPA data cover the United States, HidroWeb covers Brazil, and ERA5-Land and MODIS are global.
+- Internet access is required; ERA5-Land and the Remote Sensing tab also require Google Earth Engine.
 
-- AORC precipitation is assigned to the hour before its timestamp; daily values cover local days. Hourly SWAT+ precipitation uses `tstep` 24; other SWAT+ variables stay daily. Hourly rows of AORC and GHCNh files are labeled by the beginning of the hour, in UTC and local standard time.
-- ERA5-Land precipitation, solar radiation, evaporation, and runoff are totals over the hour ending at the image time, assigned to that hour as for AORC. Evaporation (total evaporation, with transpiration) is written positive for water leaving the surface; soil moisture is volumetric water (m³/m³) of the layers 0-7, 7-28, 28-100, and 100-289 cm. ERA5-Land covers land only: cells over the sea are blank (-99 in SWAT+ files). The latest days are published about 5 days late.
-- Reference ET is calculated with the FAO-56 Penman-Monteith equation for grass (Allen et al., 1998) from the temperature, humidity, pressure, solar radiation, and wind of the dataset (ERA5-Land humidity from the 2 m dewpoint), on the same grid as the other variables (daily Eq. 6; hourly Eq. 53). SWAT+ files `*.pet` and `pet.cli` hold daily ETo; set the SWAT+ PET method to read values from file.
-- AORC data are read in archive chunks of about 1° × 2°; large areas on the original grid take long. Start with one year and a small area. ERA5-Land values are read once per cell, in Earth Engine requests of up to about 800,000 values.
-- Daily CSV files of the USGS Data and HidroWeb Data tabs list every day of the period, and hourly GHCNh files every hour; -99 marks a day or hour without a value.
-- USGS values include their approval status; provisional values may be revised.
-- GHCN-Daily precipitation is the 24-hour total ending at the observation time of each gauge; COOP and CoCoRaHS gauges are usually read in the morning, so their day differs from a calendar day. NOAA measurement, quality, and source flags are kept.
-- GHCNh hourly precipitation uses the last report of each hour, so airport special reports (METAR SPECI, running totals) are not counted twice. NOAA rain gauge site ids are `GHCN-<station>` for both daily and hourly data (2.0.0 used `GHCND-<station>`).
-- The public ANA service accepts about one request per second per IP address, whatever the method; the plugin sends HidroWeb requests at that rate, so a download takes about one second per series whatever the Parallel processing value, and the check groups its station searches into a few large requests.
-- HidroWeb daily series keep one value per day: consisted data where ANA has them, raw data otherwise, and daily means over single readings. Rain gauges are found by their code (whole degrees of latitude and longitude), streamflow stations by the sub-basins of the nearby rain gauges.
-- Sampling points are found through the Water Quality Portal, which stopped receiving USGS samples on 2024-03-11; USGS sites first sampled after that date are not listed.
-- Without an API key, USGS limits requests per hour; large downloads may be slow or partly fail (see `warnings.txt`).
-- Earth Engine computes only the area mean of each image (one request per product and year); MODIS 8-day totals are split evenly over their days and summed by month on your computer. MODIS water, urban, and barren pixels have no ET and are excluded. The latest months may not be published yet.
+## Citation
 
-## Data sources and citation
+If you use Weather Extractor, please cite:
 
-- NOAA. NOAA Analysis of Record for Calibration (AORC) Dataset. Accessed YYYY-MM-DD from https://registry.opendata.aws/noaa-nws-aorc/.
-- Muñoz Sabater, J. (2019). ERA5-Land hourly data from 1950 to present. Copernicus Climate Change Service (C3S) Climate Data Store (CDS). https://doi.org/10.24381/cds.e2161bac
-- Muñoz-Sabater, J., et al. (2021). ERA5-Land: a state-of-the-art global reanalysis dataset for land applications. *Earth System Science Data, 13*, 4349–4383. https://doi.org/10.5194/essd-13-4349-2021 (ERA5-Land outputs: "Generated using Copernicus Climate Change Service information [year]")
-- Allen, R.G., Pereira, L.S., Raes, D., & Smith, M. (1998). *Crop evapotranspiration: Guidelines for computing crop water requirements.* FAO Irrigation and Drainage Paper 56. FAO, Rome.
-- Fall, G., et al. (2023). The Office of Water Prediction's Analysis of Record for Calibration, version 1.1: Dataset description and precipitation evaluation. *JAWRA, 59*(6), 1246–1272. https://doi.org/10.1111/1752-1688.13143
-- U.S. Geological Survey, Water Data for the Nation, accessed YYYY-MM-DD, at https://waterdata.usgs.gov/.
-- Water Quality Portal, National Water Quality Monitoring Council. https://doi.org/10.5066/P9QRKUVJ
-- Menne, M.J., Durre, I., Vose, R.S., Gleason, B.E., & Houston, T.G. (2012). An overview of the Global Historical Climatology Network-Daily database. *Journal of Atmospheric and Oceanic Technology, 29*, 897–910. https://doi.org/10.1175/JTECH-D-11-00103.1 (data: GHCN-Daily, Version 3, https://doi.org/10.7289/V5D21VHZ)
-- Menne, M.J., Noone, S., Casey, N.W., Dunn, R.H., McNeill, S., Kantor, D., Thorne, P.W., Orcutt, K., Cunningham, S., & Risavi, N. (2023). Global Historical Climatology Network-Hourly (GHCNh). NOAA National Centers for Environmental Information. https://doi.org/10.25921/jp3d-3v19
-- Agência Nacional de Águas e Saneamento Básico (ANA). HidroWeb, Sistema de Informações Hidrológicas. Accessed YYYY-MM-DD at https://www.snirh.gov.br/hidroweb/.
-- Melton, F.S., et al. (2022). OpenET: Filling a critical data gap in water management for the western United States. *JAWRA, 58*(6), 971–994. https://doi.org/10.1111/1752-1688.12956 (OpenET data: CC-BY-4.0)
-- Running, S., Mu, Q., Zhao, M., & Moreno, A. (2021). MODIS/Terra Net Evapotranspiration Gap-Filled 8-Day L4 Global 500m SIN Grid V061. NASA LP DAAC. https://doi.org/10.5067/MODIS/MOD16A2GF.061
+> Weather Extractor contributors (2026). *Weather Extractor* (version 2.4.0) [QGIS plugin]. https://github.com/ECRIPPEL/weather-extractor
 
-Outputs are derived data, not original NOAA, ECMWF, USGS, ANA, OpenET, or NASA data. This plugin is an independent tool, not affiliated with or endorsed by these agencies or by Google.
+Please also cite the data you download:
 
-## License
+- NOAA AORC: Fall, G., et al. (2023). The Office of Water Prediction's Analysis of Record for Calibration, version 1.1. *JAWRA, 59*(6), 1246–1272. https://doi.org/10.1111/1752-1688.13143
+- ERA5-Land: Muñoz Sabater, J. (2019). ERA5-Land hourly data from 1950 to present. Copernicus Climate Change Service (C3S) Climate Data Store. https://doi.org/10.24381/cds.e2161bac; and Muñoz-Sabater, J., et al. (2021). *Earth System Science Data, 13*, 4349–4383. https://doi.org/10.5194/essd-13-4349-2021
+- Reference ET: Allen, R.G., Pereira, L.S., Raes, D. & Smith, M. (1998). *Crop evapotranspiration.* FAO Irrigation and Drainage Paper 56. FAO, Rome.
+- USGS: U.S. Geological Survey. Water Data for the Nation. https://waterdata.usgs.gov/
+- Water Quality Portal: National Water Quality Monitoring Council. https://doi.org/10.5066/P9QRKUVJ
+- GHCN: Menne, M.J., et al. (2012). *Journal of Atmospheric and Oceanic Technology, 29*, 897–910. https://doi.org/10.1175/JTECH-D-11-00103.1; and Menne, M.J., et al. (2023). GHCNh. NOAA NCEI. https://doi.org/10.25921/jp3d-3v19
+- HidroWeb: Agência Nacional de Águas e Saneamento Básico (ANA). https://www.snirh.gov.br/hidroweb/
+- OpenET: Melton, F.S., et al. (2022). *JAWRA, 58*(6), 971–994. https://doi.org/10.1111/1752-1688.12956
+- MODIS: Running, S., et al. (2021). MOD16A2GF v061. NASA LP DAAC. https://doi.org/10.5067/MODIS/MOD16A2GF.061
 
-MIT (see `LICENSE`).
+ERA5-Land outputs must state "Generated using Copernicus Climate Change Service information [year]". Outputs are derived data; the plugin is not affiliated with or endorsed by NOAA, ECMWF, USGS, EPA, ANA, OpenET, NASA or Google.
 
-## Build and tests
+## Build
 
-`weather_extractor/vendor/`, with the Python libraries that QGIS for Windows lacks, is not kept in git. From the repository root, this command downloads them with pip (versions pinned in `weather_extractor/vendor-requirements.txt`) and writes `dist/Weather_Extractor-<version>-win.zip`:
-
-```powershell
-python scripts/build_zip.py --vendor
-```
-
-Offline tests are in `tests/` and need `vendor/`. From the repository root:
+From the repository root, `python scripts/build_zip.py` writes `dist/Weather_Extractor-<version>.zip`, without compiled files, as the QGIS plugin repository requires. `--vendor` downloads the AORC libraries into `weather_extractor/vendor/` (not kept in git), which the tests use, and `--full` also writes a ZIP that bundles them, for computers that cannot reach pypi.org. Offline tests:
 
 ```powershell
 & 'C:\Program Files\QGIS 3.40.x\bin\python-qgis-ltr.bat' -m unittest discover -s tests -t . -v
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).

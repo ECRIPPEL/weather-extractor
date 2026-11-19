@@ -1,11 +1,14 @@
-"""Build the QGIS plugin ZIP for Windows: dist/Weather_Extractor-<version>-win.zip.
+"""Build the QGIS plugin ZIP.
 
-    python scripts/build_zip.py            # reuse weather_extractor/vendor if present
-    python scripts/build_zip.py --vendor   # rebuild weather_extractor/vendor first
+    python scripts/build_zip.py            # dist/Weather_Extractor-<version>.zip, no compiled files
+    python scripts/build_zip.py --vendor   # (re)build weather_extractor/vendor, used by the tests
+    python scripts/build_zip.py --full     # also dist/Weather_Extractor-<version>-win-full.zip, with vendor/
 
-vendor/ holds the Python libraries that QGIS for Windows lacks, pinned in
-weather_extractor/vendor-requirements.txt and downloaded with pip for Windows and
-Python 3.12 (the QGIS Python). It is not kept in git. The tests in tests/ need it too.
+The plain ZIP is the one for the QGIS plugin repository, which does not accept compiled
+files: the AORC libraries (weather_extractor/vendor-requirements.txt) are installed with
+pip on first use (weather_extractor/dependencies.py). The full ZIP bundles them in vendor/
+for computers that cannot reach pypi.org. vendor/ is downloaded with pip for Windows and
+Python 3.12 (the QGIS Python) and is not kept in git.
 """
 
 import argparse
@@ -24,6 +27,7 @@ SOURCE_ONLY = {"asciitree"}
 # Copied from the repository root into the plugin folder of the ZIP.
 ROOT_FILES = ["README.md", "LICENSE"]
 SKIPPED = {"__pycache__"}
+COMPILED = {".pyd", ".dll", ".so", ".dylib", ".exe", ".pyc"}
 
 
 def pip(*args):
@@ -57,27 +61,36 @@ def version():
     raise SystemExit("metadata.txt has no version.")
 
 
-def build_zip():
-    target = ROOT / "dist" / f"Weather_Extractor-{version()}-win.zip"
+def build_zip(full=False):
+    suffix = "-win-full" if full else ""
+    target = ROOT / "dist" / f"Weather_Extractor-{version()}{suffix}.zip"
     target.parent.mkdir(exist_ok=True)
     count = 0
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:
         for path in sorted(PACKAGE.rglob("*")):
             relative = path.relative_to(ROOT)
-            if path.is_dir() or SKIPPED & set(relative.parts) or path.suffix == ".pyc":
+            parts = relative.parts
+            hidden = any(part.startswith(".") for part in parts)
+            in_vendor = len(parts) > 1 and parts[1] == VENDOR.name
+            if path.is_dir() or hidden or SKIPPED & set(parts) or path.suffix == ".pyc" or (in_vendor and not full):
                 continue
+            if not full and path.suffix.lower() in COMPILED:
+                raise SystemExit(f"Compiled file outside vendor/: {relative}")
             archive.write(path, relative.as_posix())
             count += 1
         for name in ROOT_FILES:
             archive.write(ROOT / name, f"{PACKAGE.name}/{name}")
             count += 1
-    print(f"{target.relative_to(ROOT)}: {count} files, {target.stat().st_size / 1e6:.1f} MB")
+    print(f"{target.relative_to(ROOT)}: {count} files, {target.stat().st_size / 1e6:.2f} MB")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--vendor", action="store_true", help="rebuild weather_extractor/vendor with pip")
+    parser.add_argument("--full", action="store_true", help="also write the ZIP that bundles vendor/")
     options = parser.parse_args()
-    if options.vendor or not VENDOR.is_dir():
+    if options.vendor or (options.full and not VENDOR.is_dir()):
         build_vendor()
     build_zip()
+    if options.full:
+        build_zip(full=True)

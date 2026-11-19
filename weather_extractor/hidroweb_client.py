@@ -120,7 +120,7 @@ def api_chunks(start, end, days=API_CHUNK_DAYS):
 class HidrowebClient(UsgsClient):
     """ServiceANA by default; HidroWebService when an ANA user (CPF/CNPJ) and password are given."""
 
-    def __init__(self, user="", password="", is_canceled=None, sleep=time.sleep):
+    def __init__(self, user=None, password=None, is_canceled=None, sleep=time.sleep):
         super().__init__("", is_canceled, sleep)
         self.user = (user or "").strip()
         self.password = password or ""

@@ -1,6 +1,7 @@
-# Fully pinned Python 3.12 Windows vendor set for QGIS 3.40 or later.
+# Fully pinned AORC libraries for QGIS 3.40 or later (Python 3.12), installed with pip
+# on first use (dependencies.py) or bundled in vendor/ by scripts/build_zip.py --full.
 # NumPy/pandas/packaging, shapely, tzdata, python-dateutil, six, idna, urllib3,
-# typing_extensions, and requests are supplied by QGIS, not copied here.
+# typing_extensions, and requests are supplied by QGIS, not installed here.
 # AORC is read over HTTPS (fsspec + aiohttp), so no AWS libraries are needed.
 xarray==2025.1.2
 zarr==2.18.7

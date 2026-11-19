@@ -103,7 +103,7 @@ def extract_hidroweb(settings, inventory, progress=None, is_canceled=None, clien
     entries = inventory.selected_entries(selection, set(site_ids) if site_ids is not None else None)
     if not entries:
         raise ValueError("Nothing is selected for download. Check at least one available box.")
-    client = client or HidrowebClient(settings.get("user", ""), settings.get("password", ""), is_canceled)
+    client = client or HidrowebClient(settings.get("user"), settings.get("password"), is_canceled)
     start, end = inventory.start, inventory.end
     base = Path(settings["output_dir"]) / FOLDER
     warnings = list(inventory.warnings)

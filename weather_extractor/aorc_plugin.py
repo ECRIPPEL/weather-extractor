@@ -29,7 +29,8 @@ CELLS_PER_SQUARE_DEGREE = {"aorc": 120 * 120, "era5land": 10 * 10}
 # Name of each gridded dataset in task titles, messages, and layer names.
 GRIDDED_NAMES = {"aorc": "AORC", "era5land": "ERA5-Land"}
 KM_PER_DEGREE = 111.195
-AORC_MODULES = ["numpy", "pandas", "xarray", "zarr", "fsspec", "aiohttp", "shapely", "tzdata", "osgeo"]
+# Supplied by QGIS; the AORC libraries (xarray, zarr...) are installed on first use (dependencies.py).
+GRIDDED_MODULES = ["numpy", "pandas", "shapely", "tzdata", "osgeo"]
 USGS_MODULES = ["numpy", "pandas", "requests", "shapely", "osgeo"]
 ET_MODULES = ["numpy", "pandas", "shapely"]
 TASK_TITLES = {
@@ -39,6 +40,7 @@ TASK_TITLES = {
     "hidroweb_check": "Weather Extractor: check HidroWeb data",
     "hidroweb": "Weather Extractor: HidroWeb data",
     "et": "Weather Extractor: evapotranspiration",
+    "deps": "Weather Extractor: install AORC libraries",
 }
 RESULT_TITLES = {"aorc": "Gridded weather", "usgs": "USGS data", "hidroweb": "HidroWeb data", "et": "Evapotranspiration"}
 CHECK_FUNCTIONS = {"usgs": "usgs_inventory", "hidroweb": "hidroweb_inventory"}
@@ -91,6 +93,8 @@ class AORCWeatherPlugin:
         self.action = None
         self.dialog = None
         self.progress_bridge = None
+        # Settings of the AORC run waiting for its libraries to be installed.
+        self._pending_extraction = None
 
     def initGui(self):
         self.action = QAction(
@@ -152,8 +156,8 @@ class AORCWeatherPlugin:
             QMessageBox.critical(
                 self.iface.mainWindow(),
                 title,
-                "The bundled runtime is incomplete or could not be loaded. "
-                "Reinstall the Weather Extractor ZIP. Missing modules:\n\n"
+                "Some Python modules that QGIS normally includes could not be loaded. "
+                "Update or reinstall QGIS (3.40 or later). Missing modules:\n\n"
                 + ", ".join(missing)
                 + "\n\nIf the problem persists, include this list when reporting the issue.",
             )
@@ -213,10 +217,17 @@ class AORCWeatherPlugin:
         if settings.get("kind") == "et":
             self._start_et_extraction(settings)
             return
-        if self._missing_modules(AORC_MODULES, "AORC dependencies are missing"):
+        if self._missing_modules(GRIDDED_MODULES, "Gridded data dependencies are missing"):
             dialog.set_running(False)
-            dialog.set_progress(0, "Bundled data packages could not be loaded.")
+            dialog.set_progress(0, "Python modules of QGIS could not be loaded.")
             return
+        # AORC needs libraries QGIS lacks; they are installed once, then the run goes on.
+        if settings.get("dataset", "aorc") == "aorc":
+            from .dependencies import missing
+
+            if missing():
+                self._install_aorc_libraries(settings)
+                return
         try:
             geometry = self._get_aoi_geometry(settings)
         except Exception as exc:
@@ -358,6 +369,53 @@ class AORCWeatherPlugin:
             raise
         self._running_message()
 
+    def _install_aorc_libraries(self, settings):
+        """Ask, then install the AORC libraries in the background; the extraction starts afterwards."""
+        dialog = self.dialog
+        answer = QMessageBox.question(
+            self.iface.mainWindow(),
+            "Install the AORC libraries",
+            "Reading AORC needs Python libraries that QGIS does not include (xarray, zarr, numcodecs, "
+            "fsspec, aiohttp, about 3 MB). They are installed once with pip from pypi.org into your "
+            "QGIS profile.\n\nInstall them now?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.Yes,
+        )
+        if answer != QMessageBox.Yes:
+            dialog.set_running(False)
+            dialog.set_progress(0, "Ready to extract.")
+            return
+        from .dependencies import install
+
+        self._pending_extraction = settings
+        try:
+            self._launch(
+                "deps",
+                lambda progress, is_canceled: {"folder": install(progress=progress, is_canceled=is_canceled)},
+                dialog.set_progress,
+            )
+        except Exception:
+            self._pending_extraction = None
+            dialog.set_running(False)
+            raise
+
+    def _dependencies_finished(self, successful, error):
+        dialog = self.dialog
+        settings, self._pending_extraction = self._pending_extraction, None
+        if dialog is None:
+            return
+        if successful and settings is not None:
+            # The dialog is still running: go on with the extraction that asked for the libraries.
+            dialog.set_progress(0, "AORC libraries installed. Starting the extraction...")
+            self._start_extraction(settings)
+            return
+        dialog.set_running(False)
+        if error is not None and not isinstance(error, InterruptedError):
+            dialog.set_progress(0, "The AORC libraries could not be installed.")
+            QMessageBox.critical(self.iface.mainWindow(), "AORC libraries not installed", f"{error}")
+        else:
+            dialog.set_progress(0, "Installation canceled.")
+
     def _running_message(self):
         self.iface.messageBar().pushInfo(
             "Weather Extractor",
@@ -388,6 +446,9 @@ class AORCWeatherPlugin:
         dialog = self.dialog
         if kind.endswith("_check"):
             self._check_finished(kind[: -len("_check")], successful, result, error)
+            return
+        if kind == "deps":
+            self._dependencies_finished(successful, error)
             return
         if dialog is not None:
             dialog.set_running(False)
