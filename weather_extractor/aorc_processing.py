@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import shapely
 
+from .aoi_selection import gauges_in_geometry
 from .usgs_catalog import site_stem
 
 
@@ -1261,6 +1262,15 @@ def extract_aorc(
     if progress:
         progress(0.0, "Connecting to the AORC archive on AWS and building stations...")
 
+    all_gauges = settings.get("gauges") or []
+    gauges = all_gauges
+    excluded_gauges = 0
+    if settings["grid_mode"] == "gauges" and settings.get("subbasin_feature_ids") is not None:
+        gauges = gauges_in_geometry(aoi_geometry, all_gauges)
+        excluded_gauges = len(all_gauges) - len(gauges)
+        if not gauges:
+            raise ValueError("None of the selected rain gauges falls inside the selected sub-basin(s).")
+
     first_dataset = dataset_opener(start_year)
     try:
         window, stations, labels = build_layout(
@@ -1268,7 +1278,7 @@ def extract_aorc(
             aoi_geometry,
             settings["grid_mode"],
             settings.get("block_km"),
-            settings.get("gauges"),
+            gauges,
         )
         chunks = _chunk_shape(first_dataset, archive_variables(variables)[0])
     finally:
@@ -1281,7 +1291,11 @@ def extract_aorc(
     for station, elevation in zip(stations, elevations):
         station["elev_m"] = elevation
     warnings = []
-    skipped = len(settings.get("gauges") or []) - len(stations)
+    if excluded_gauges:
+        warnings.append(
+            f"{excluded_gauges} selected rain gauge(s) lie outside the selected sub-basin(s) and were left out."
+        )
+    skipped = len(gauges) - len(stations)
     if settings["grid_mode"] == "gauges" and skipped:
         warnings.append(f"{skipped} rain gauge(s) lie outside the AORC grid and were left out.")
     if uncovered:
