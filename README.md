@@ -39,8 +39,6 @@ Start in **Setup** to define your area of interest and output settings. Then cho
 
 Define the area of interest using a polygon file, an existing project layer, a shape drawn on the map, or manually entered bounds.
 
-For a polygon layer containing multiple watersheds or sub-basins, all features are included by default. To process only specific sub-basins, select one or more polygon features in QGIS and enable **Use only polygons selected on the map**. The chosen area is used consistently for previews, availability checks and downloads.
-
 Choose the output folder, the coordinate reference system (CRS) for output layers, and the timezone. Timezone settings use local standard time, without daylight saving time. An optional elevation raster supplies elevations for gridded extraction points.
 
 <img src="docs/images/setup.png" width="460" alt="Setup tab showing the area of interest and output settings">
@@ -57,8 +55,6 @@ Choose between two datasets:
 | ERA5-Land | Global land areas | ~9 km | 1950 | Google Earth Engine |
 
 Both provide precipitation, temperature, solar radiation, humidity and wind from hourly data. The plugin exports daily and/or hourly time series and calculates FAO-56 reference evapotranspiration. ERA5-Land also provides evaporation, runoff and soil moisture.
-
-Click **Preview availability** to display the exact station locations for the selected grid layout, along with the selected date range, variables and source coverage limits. The preview reads grid metadata only and does not download weather data. AORC coverage is limited to the contiguous United States and contributing areas; ERA5-Land is land-only, so some grid cells may have no values.
 
 Choose how to distribute extraction points:
 

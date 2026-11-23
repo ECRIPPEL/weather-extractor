@@ -21,7 +21,6 @@ from qgis.core import (
 )
 
 from .dialog import WeatherExtractorDialog
-from .aoi_selection import union_polygon_features
 
 
 # Ask for confirmation above this many stations.
@@ -36,7 +35,6 @@ USGS_MODULES = ["numpy", "pandas", "requests", "shapely", "osgeo"]
 ET_MODULES = ["numpy", "pandas", "shapely"]
 TASK_TITLES = {
     "aorc": "Weather Extractor: gridded weather",
-    "grid_preview": "Weather Extractor: gridded availability preview",
     "usgs_check": "Weather Extractor: check USGS data",
     "usgs": "Weather Extractor: USGS data",
     "hidroweb_check": "Weather Extractor: check HidroWeb data",
@@ -46,7 +44,6 @@ TASK_TITLES = {
 }
 RESULT_TITLES = {"aorc": "Gridded weather", "usgs": "USGS data", "hidroweb": "HidroWeb data", "et": "Evapotranspiration"}
 CHECK_FUNCTIONS = {"usgs": "usgs_inventory", "hidroweb": "hidroweb_inventory"}
-GRID_PREVIEW_GROUP = "Gridded data (preview)"
 
 
 class _TaskProgressBridge(QObject):
@@ -98,7 +95,6 @@ class WeatherExtractorPlugin:
         self.progress_bridge = None
         # Settings of the NOAA AORC extraction waiting for its dependencies.
         self._pending_extraction = None
-        self._pending_preview = None
 
     def initGui(self):
         self.action = QAction(
@@ -126,8 +122,6 @@ class WeatherExtractorPlugin:
             return
         dialog = WeatherExtractorDialog(self.iface, self.iface.mainWindow())
         dialog.extractionRequested.connect(self._start_extraction)
-        dialog.gridPreviewRequested.connect(self._start_grid_preview)
-        dialog.gridPreviewInvalidated.connect(self._clear_grid_preview)
         dialog.usgsCheckRequested.connect(lambda settings: self._start_check("usgs", settings))
         dialog.hidrowebCheckRequested.connect(lambda settings: self._start_check("hidroweb", settings))
         dialog.cancelRequested.connect(self._cancel_extraction)
@@ -207,75 +201,6 @@ class WeatherExtractorPlugin:
             ),
             dialog.observed_tabs[kind][0].set_check_progress,
         )
-
-    def _start_grid_preview(self, settings):
-        dialog = self.dialog
-        if dialog is None or self._task_active:
-            return
-        if self._missing_modules(GRIDDED_MODULES, "Gridded data dependencies are missing"):
-            return
-        try:
-            geometry = self._get_aoi_geometry(settings, show=False)
-        except Exception as exc:
-            QMessageBox.critical(self.iface.mainWindow(), "Invalid area of interest", str(exc))
-            return
-        estimate = self._estimate_station_count(settings, geometry)
-        if estimate > LARGE_STATION_COUNT:
-            answer = QMessageBox.question(
-                self.iface.mainWindow(),
-                "Large station preview",
-                f"This grid layout may add about {estimate:,} points to the map. "
-                "The preview does not download weather data, but a large point layer may take "
-                "time and memory to display.\n\nContinue?",
-                QMessageBox.Yes | QMessageBox.No,
-                QMessageBox.No,
-            )
-            if answer != QMessageBox.Yes:
-                return
-        if settings.get("dataset", "aorc") == "aorc":
-            from .dependencies import missing
-
-            if missing():
-                self._install_aorc_dependencies(settings, operation="preview")
-                return
-
-        try:
-            if settings.get("dataset") == "era5land":
-                from .era5_processing import grid_projection
-                from .et_processing import _with_retries, connect, import_earth_engine
-                from .et_tab import earth_engine_library_paths
-
-                ee = import_earth_engine(earth_engine_library_paths())
-                project = settings["et"]["project"]
-
-                def function(progress, is_canceled):
-                    connect(ee, project, progress)
-                    projection = _with_retries(lambda: grid_projection(ee), is_canceled)
-                    from .grid_preview import build_preview
-
-                    return build_preview(settings, geometry, projection=projection)
-            else:
-                from .grid_preview import build_preview
-
-                def function(progress, is_canceled):
-                    progress(10.0, "Reading AORC grid metadata...")
-                    if is_canceled():
-                        raise InterruptedError("The gridded availability preview was canceled.")
-                    return build_preview(settings, geometry)
-        except Exception as exc:
-            dialog.grid_preview_status.setText(f"Preview could not start: {exc}")
-            QMessageBox.critical(
-                self.iface.mainWindow(), "Gridded availability preview unavailable", str(exc)
-            )
-            return
-
-        dialog.set_grid_previewing(True)
-        dialog.set_progress(0, "Preparing gridded availability preview...")
-        try:
-            self._launch("grid_preview", function, dialog.set_progress)
-        except Exception:
-            dialog.set_grid_previewing(False)
-            raise
 
     # -- Extractions ---------------------------------------------------------
 
@@ -444,8 +369,8 @@ class WeatherExtractorPlugin:
             raise
         self._running_message()
 
-    def _install_aorc_dependencies(self, settings, operation="extraction"):
-        """Ask, then install NOAA AORC dependencies before extraction or preview."""
+    def _install_aorc_dependencies(self, settings):
+        """Ask, then install NOAA AORC data dependencies before extraction."""
         dialog = self.dialog
         answer = QMessageBox.question(
             self.iface.mainWindow(),
@@ -458,20 +383,12 @@ class WeatherExtractorPlugin:
             QMessageBox.Yes,
         )
         if answer != QMessageBox.Yes:
-            if operation == "preview":
-                dialog.set_grid_previewing(False)
-                dialog.grid_preview_status.setText("AORC preview requires the optional data dependencies.")
-            else:
-                dialog.set_running(False)
-                dialog.set_progress(0, "Ready to extract.")
+            dialog.set_running(False)
+            dialog.set_progress(0, "Ready to extract.")
             return
         from .dependencies import install
 
-        if operation == "preview":
-            self._pending_preview = settings
-            dialog.set_grid_previewing(True)
-        else:
-            self._pending_extraction = settings
+        self._pending_extraction = settings
         try:
             self._launch(
                 "deps",
@@ -480,22 +397,13 @@ class WeatherExtractorPlugin:
             )
         except Exception:
             self._pending_extraction = None
-            self._pending_preview = None
-            if operation == "preview":
-                dialog.set_grid_previewing(False)
-            else:
-                dialog.set_running(False)
+            dialog.set_running(False)
             raise
 
     def _dependencies_finished(self, successful, error):
         dialog = self.dialog
         settings, self._pending_extraction = self._pending_extraction, None
-        preview_settings, self._pending_preview = self._pending_preview, None
         if dialog is None:
-            return
-        if successful and preview_settings is not None:
-            dialog.set_progress(0, "Weather Extractor dependencies installed. Starting the availability preview...")
-            self._start_grid_preview(preview_settings)
             return
         if successful and settings is not None:
             # The dialog is still running: go on with the extraction that asked for the libraries.
@@ -503,7 +411,6 @@ class WeatherExtractorPlugin:
             self._start_extraction(settings)
             return
         dialog.set_running(False)
-        dialog.set_grid_previewing(False)
         if error is not None and not isinstance(error, InterruptedError):
             dialog.set_progress(0, "Weather Extractor could not install the NOAA AORC dependencies.")
             QMessageBox.critical(
@@ -543,9 +450,6 @@ class WeatherExtractorPlugin:
         if kind.endswith("_check"):
             self._check_finished(kind[: -len("_check")], successful, result, error)
             return
-        if kind == "grid_preview":
-            self._grid_preview_finished(successful, result, error)
-            return
         if kind == "deps":
             self._dependencies_finished(successful, error)
             return
@@ -573,68 +477,6 @@ class WeatherExtractorPlugin:
                 f"{title} extraction canceled",
                 "The extraction was canceled. Any outputs already written may be incomplete.",
             )
-
-    def _grid_preview_finished(self, successful, result, error):
-        dialog = self.dialog
-        if dialog is None:
-            return
-        dialog.set_grid_previewing(False)
-        if successful:
-            self._show_grid_preview(result)
-            dialog.grid_preview_status.setText(result["summary"])
-            dialog.set_progress(100, "Availability preview ready; no weather data was downloaded.")
-        elif error is not None and not isinstance(error, InterruptedError):
-            dialog.grid_preview_status.setText(f"Preview failed: {error}")
-            dialog.set_progress(0, "Availability preview failed.")
-            QMessageBox.critical(self.iface.mainWindow(), "Gridded availability preview failed", str(error))
-        else:
-            dialog.grid_preview_status.setText("Preview canceled.")
-            dialog.set_progress(0, "Availability preview canceled.")
-
-    def _show_grid_preview(self, result):
-        project = QgsProject.instance()
-        root = project.layerTreeRoot()
-        group = root.findGroup(GRID_PREVIEW_GROUP)
-        if group is not None:
-            for node in group.findLayers():
-                project.removeMapLayer(node.layerId())
-        else:
-            group = root.insertGroup(0, GRID_PREVIEW_GROUP)
-
-        layer = QgsVectorLayer(
-            "Point?crs=EPSG:4326&field=station:string&field=cells:integer",
-            f"{GRIDDED_NAMES[result['dataset']]} station locations (preview)",
-            "memory",
-        )
-        features = []
-        for station in result["stations"]:
-            feature = QgsFeature(layer.fields())
-            feature.setAttributes([station["station"], station["cells"]])
-            feature.setGeometry(
-                QgsGeometry.fromPointXY(QgsPointXY(station["lon"], station["lat"]))
-            )
-            features.append(feature)
-        layer.dataProvider().addFeatures(features)
-        layer.updateExtents()
-        color = "31,120,180" if result["dataset"] == "aorc" else "106,61,154"
-        layer.renderer().setSymbol(
-            QgsMarkerSymbol.createSimple({"name": "circle", "color": color, "size": "2.6"})
-        )
-        project.addMapLayer(layer, False)
-        group.addLayer(layer)
-        self.iface.setActiveLayer(layer)
-        self.iface.zoomToActiveLayer()
-
-    def _clear_grid_preview(self):
-        project = QgsProject.instance()
-        root = project.layerTreeRoot()
-        group = root.findGroup(GRID_PREVIEW_GROUP)
-        if group is None:
-            return
-        for node in group.findLayers():
-            project.removeMapLayer(node.layerId())
-        if not group.children():
-            root.removeChildNode(group)
 
     def _check_finished(self, kind, successful, inventory, error):
         dialog = self.dialog
@@ -860,24 +702,27 @@ class WeatherExtractorPlugin:
         transform = QgsCoordinateTransform(
             layer.crs(), destination, QgsProject.instance()
         )
-        selected_feature_ids = settings.get("subbasin_feature_ids")
-        selected_feature_ids = (
-            set(selected_feature_ids) if selected_feature_ids is not None else None
-        )
         geometries = []
         for feature in layer.getFeatures():
-            if selected_feature_ids is not None and feature.id() not in selected_feature_ids:
-                continue
             qgs_geometry = feature.geometry()
             if qgs_geometry.isNull() or qgs_geometry.isEmpty():
                 continue
             qgs_geometry.transform(transform)
-            geometries.append((feature.id(), shapely.from_wkb(bytes(qgs_geometry.asWkb()))))
+            geometries.append(shapely.from_wkb(bytes(qgs_geometry.asWkb())))
         if not geometries:
-            if selected_feature_ids is not None:
-                raise ValueError("The selected polygon features contain no usable area.")
             raise ValueError("The AOI layer contains no polygon geometry.")
-        geometry = union_polygon_features(geometries, selected_feature_ids)
+        geometry = shapely.union_all(geometries)
+
+        if geometry.is_empty:
+            raise ValueError("The AOI geometry is empty.")
+        if not geometry.is_valid:
+            geometry = shapely.make_valid(geometry)
+        if geometry.geom_type == "GeometryCollection":
+            geometry = shapely.union_all(
+                [part for part in geometry.geoms if part.geom_type in ("Polygon", "MultiPolygon")]
+            )
+        if geometry.is_empty or geometry.geom_type not in ("Polygon", "MultiPolygon"):
+            raise ValueError("The AOI must contain polygon geometry.")
         if show:
             self.iface.setActiveLayer(layer)
             self.iface.zoomToActiveLayer()
