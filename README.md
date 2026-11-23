@@ -2,7 +2,7 @@
 
 **Version 2.4.1**
 
-Weather Extractor is a QGIS plugin that downloads hydroclimatic data for an area of interest: gridded weather (NOAA's AORC dataset and ERA5-Land), observed data from USGS, EPA, NOAA and ANA, and evapotranspiration from OpenET and MODIS. Here, AORC refers to the NOAA dataset; the plugin is named Weather Extractor. Before downloading, each tab checks what exists in the area and period and previews the stations on the map. Outputs are CSV tables, GeoPackage station layers and optional SWAT+ climate files.
+Weather Extractor is a QGIS plugin that downloads hydroclimatic data for an area of interest: gridded weather (NOAA's AORC dataset and ERA5-Land), observed data from USGS, EPA, NOAA and ANA, and evapotranspiration from OpenET and MODIS. Before downloading, each tab checks what exists in the area and period and previews the stations on the map. Outputs are CSV tables, GeoPackage station layers and optional SWAT+ climate files.
 
 ![Overview](docs/images/overview.png)
 
