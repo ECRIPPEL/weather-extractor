@@ -125,11 +125,12 @@ class EtTab(QWidget):
             return True
         installed, signed_in, has_project = status
         mark = {True: "✓", False: "✗"}
+        action = "Preview availability" if purpose == "ERA5-Land preview" else "Run"
         message = QMessageBox(
             QMessageBox.Information,
             "Google Earth Engine setup",
             f"{purpose} come from Google Earth Engine. "
-            "Complete the steps marked ✗, then press Run again.\n\n"
+            f"Complete the steps marked ✗, then press {action} again.\n\n"
             f"{mark[installed]}  1. Install and enable the 'Google Earth Engine' plugin\n"
             "      (Plugins > Manage and Install Plugins).\n\n"
             f"{mark[signed_in]}  2. Sign in with your Google account in the plugin\n"

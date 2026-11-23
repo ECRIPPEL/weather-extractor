@@ -31,6 +31,7 @@ from .aorc_processing import (
     write_station_locations,
     write_warnings,
 )
+from .aoi_selection import gauges_in_geometry
 from .et_processing import _with_retries, connect
 
 
@@ -271,7 +272,14 @@ def extract_era5(settings, aoi_geometry, progress=None, is_canceled=None, ee_mod
     else:
         crs, transform = projection
 
-    gauges = settings.get("gauges") or []
+    all_gauges = settings.get("gauges") or []
+    gauges = all_gauges
+    excluded_gauges = 0
+    if settings["grid_mode"] == "gauges" and settings.get("subbasin_feature_ids") is not None:
+        gauges = gauges_in_geometry(aoi_geometry, all_gauges)
+        excluded_gauges = len(all_gauges) - len(gauges)
+        if not gauges:
+            raise ValueError("None of the selected rain gauges falls inside the selected sub-basin(s).")
     bounds = aoi_geometry.bounds
     if settings["grid_mode"] == "gauges" and gauges:
         lons = [g["lon"] for g in gauges] + [bounds[0], bounds[2]]
@@ -297,6 +305,10 @@ def extract_era5(settings, aoi_geometry, progress=None, is_canceled=None, ee_mod
     for station, elevation in zip(stations, elevations):
         station["elev_m"] = elevation
     warnings = []
+    if excluded_gauges:
+        warnings.append(
+            f"{excluded_gauges} selected rain gauge(s) lie outside the selected sub-basin(s) and were left out."
+        )
     skipped = len(gauges) - len(stations)
     if settings["grid_mode"] == "gauges" and skipped:
         warnings.append(f"{skipped} rain gauge(s) lie outside the ERA5-Land grid and were left out.")
