@@ -1,3 +1,21 @@
-# Supplied by the QGIS runtime: numpy, pandas, shapely, requests, tzdata, and GDAL/osgeo.
-# The AORC dataset also needs the modules pinned in vendor-requirements.txt; the plugin
-# installs them with pip into the QGIS profile on first use (dependencies.py).
+# Pinned dependencies installed by Weather Extractor for the NOAA AORC dataset.
+# NumPy, pandas, Shapely, requests, tzdata, and GDAL/osgeo are supplied by QGIS;
+# QGIS/PyQt and GDAL bindings must remain compatible with the host QGIS installation.
+# Keep the dataset-specific dependencies and their transitive dependencies pinned here because
+# dependencies.py and scripts/build_zip.py install this list with --no-deps.
+xarray==2025.1.2
+zarr==2.18.7
+numcodecs==0.15.1
+fsspec==2025.3.0
+aiohttp==3.14.3
+aiohappyeyeballs==2.7.1
+aiosignal==1.4.0
+asciitree==0.3.3
+attrs==26.1.0
+deprecated==3.0.0
+fasteners==0.20
+frozenlist==1.8.0
+multidict==6.9.1
+propcache==0.5.4
+wrapt==1.17.3
+yarl==1.25.1

@@ -13,7 +13,7 @@ from qgis.core import (
 from qgis.gui import QgsMapTool, QgsRubberBand
 
 
-class AORCPolygonTool(QgsMapTool):
+class AOIPolygonTool(QgsMapTool):
     """Digitize a polygon vertex by vertex, like the QGIS Add Polygon tool.
 
     Left-click adds a vertex, right-click or Enter finishes, Backspace removes
@@ -86,7 +86,7 @@ class AORCPolygonTool(QgsMapTool):
                 canvas_crs, QgsCoordinateReferenceSystem("EPSG:4326"), QgsProject.instance()
             )
         )
-        layer = QgsVectorLayer("Polygon?crs=EPSG:4326", "AORC drawn AOI", "memory")
+        layer = QgsVectorLayer("Polygon?crs=EPSG:4326", "Weather Extractor drawn AOI", "memory")
         feature = QgsFeature(layer.fields())
         feature.setGeometry(geometry)
         layer.dataProvider().addFeatures([feature])

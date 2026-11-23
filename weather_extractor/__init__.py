@@ -1,10 +1,10 @@
 from .dependencies import add_to_path
 
-# The AORC libraries: vendor/ (full ZIP, tests) or the ones installed on first use.
+# NOAA AORC support dependencies: vendor/ (full ZIP, tests) or first-use installation.
 add_to_path()
 
 
 def classFactory(iface):
-    from .aorc_plugin import AORCWeatherPlugin
+    from .plugin import WeatherExtractorPlugin
 
-    return AORCWeatherPlugin(iface)
+    return WeatherExtractorPlugin(iface)

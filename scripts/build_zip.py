@@ -5,10 +5,11 @@
     python scripts/build_zip.py --full     # also dist/Weather_Extractor-<version>-win-full.zip, with vendor/
 
 The plain ZIP is the one for the QGIS plugin repository, which does not accept compiled
-files: the AORC libraries (weather_extractor/vendor-requirements.txt) are installed with
+files: the pinned dependencies for Weather Extractor's NOAA AORC data source
+(weather_extractor/requirements.txt) are installed with
 pip on first use (weather_extractor/dependencies.py). The full ZIP bundles them in vendor/
-for computers that cannot reach pypi.org. vendor/ is downloaded with pip for Windows and
-Python 3.12 (the QGIS Python) and is not kept in git.
+for computers that cannot reach pypi.org. vendor/ is downloaded with pip for Windows x64
+and Python 3.12 (the QGIS Python) and is not kept in git.
 """
 
 import argparse
@@ -21,7 +22,7 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "weather_extractor"
 VENDOR = PACKAGE / "vendor"
-REQUIREMENTS = PACKAGE / "vendor-requirements.txt"
+REQUIREMENTS = PACKAGE / "requirements.txt"
 # Published only as source; pure Python, so it installs on any platform.
 SOURCE_ONLY = {"asciitree"}
 # Copied from the repository root into the plugin folder of the ZIP.
@@ -41,8 +42,10 @@ def build_vendor():
     binary = [pin for pin in pins if pin.split("==")[0].lower() not in SOURCE_ONLY]
     source = [pin for pin in pins if pin not in binary]
     shutil.rmtree(VENDOR, ignore_errors=True)
+    # pip checks Requires-Python against the build interpreter for --target, even
+    # when --python-version selects wheels for the Python 3.12 QGIS target.
     pip("--platform", "win_amd64", "--python-version", "3.12", "--implementation", "cp",
-        "--only-binary=:all:", *binary)
+        "--only-binary=:all:", "--ignore-requires-python", *binary)
     if source:
         pip(*source)
     # Test suites of the libraries and console scripts are not needed by the plugin.

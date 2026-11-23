@@ -38,7 +38,7 @@ from qgis.core import (
 )
 from qgis.gui import QgsProjectionSelectionWidget
 
-from .aorc_map_tool import AORCPolygonTool
+from .aoi_map_tool import AOIPolygonTool
 from .et_tab import EtTab
 from .hidroweb_tab import HidrowebTab
 from .usgs_tab import UsgsTab
@@ -51,7 +51,7 @@ POLYGON_FILE_FILTER = (
 POLYGON_FILE_SUFFIXES = (".shp", ".gpkg", ".geojson", ".json")
 
 
-TAB_AREA, TAB_AORC, TAB_USGS, TAB_HIDROWEB, TAB_ET = range(5)
+TAB_AREA, TAB_GRIDDED, TAB_USGS, TAB_HIDROWEB, TAB_ET = range(5)
 TAB_TITLES = ["1. Setup", "2. Gridded Data", "3. USGS Data", "4. HidroWeb Data", "5. Remote Sensing"]
 # Shown above the tabs; short enough for two lines, so the window keeps its height.
 TAB_DESCRIPTIONS = [
@@ -135,7 +135,7 @@ def crs_definition(crs):
         return crs.toWkt(QgsCoordinateReferenceSystem.WKT_PREFERRED_GDAL)
 
 
-class AORCDialog(QDialog):
+class WeatherExtractorDialog(QDialog):
     extractionRequested = pyqtSignal(object)
     usgsCheckRequested = pyqtSignal(object)
     hidrowebCheckRequested = pyqtSignal(object)
@@ -445,7 +445,7 @@ class AORCDialog(QDialog):
         self.tabs = QTabWidget()
         self.tabs.addTab(self._tab_page(aoi_group, output_group), TAB_TITLES[TAB_AREA])
         self.tabs.addTab(
-            self._tab_page(period_group, aorc_output_group, footer=self.aorc_run), TAB_TITLES[TAB_AORC]
+            self._tab_page(period_group, aorc_output_group, footer=self.aorc_run), TAB_TITLES[TAB_GRIDDED]
         )
         self.tabs.addTab(self.usgs_tab, TAB_TITLES[TAB_USGS])
         self.tabs.addTab(self.hidroweb_tab, TAB_TITLES[TAB_HIDROWEB])
@@ -683,7 +683,7 @@ class AORCDialog(QDialog):
             "Click to add each vertex of the AOI. Right-click or Enter finishes, "
             "Backspace removes the last vertex, Esc cancels.",
         )
-        self._draw_tool = AORCPolygonTool(self.iface, self._drawing_finished)
+        self._draw_tool = AOIPolygonTool(self.iface, self._drawing_finished)
         self.iface.mapCanvas().setMapTool(self._draw_tool)
 
     def _drawing_finished(self, layer):
@@ -886,17 +886,17 @@ class AORCDialog(QDialog):
         """Checks for tab 2 (gridded weather); ERA5-Land also needs the Earth Engine setup."""
         settings = self.get_settings()
         if settings["start_year"] > settings["end_year"]:
-            return self._invalid(TAB_AORC, "Invalid year range", "The start year must be less than or equal to the end year.")
+            return self._invalid(TAB_GRIDDED, "Invalid year range", "The start year must be less than or equal to the end year.")
         try:
             ZoneInfo(settings["timezone"])
         except Exception:
             return self._invalid(TAB_AREA, "Timezone data unavailable", "The timezone database could not be loaded. Reinstall the plugin ZIP.")
         if not settings["variables"]:
-            return self._invalid(TAB_AORC, "No climate variables", "Select at least one climate variable.")
+            return self._invalid(TAB_GRIDDED, "No climate variables", "Select at least one climate variable.")
         if not settings["write_csv"] and not settings["write_swat"]:
-            return self._invalid(TAB_AORC, "No output selected", "Choose CSV, SWAT+ climate files, or both.")
+            return self._invalid(TAB_GRIDDED, "No output selected", "Choose CSV, SWAT+ climate files, or both.")
         if settings["write_csv"] and not settings["timesteps"]:
-            return self._invalid(TAB_AORC, "No time step", "Check Daily, Hourly, or both.")
+            return self._invalid(TAB_GRIDDED, "No time step", "Check Daily, Hourly, or both.")
         if settings["grid_mode"] == "gauges":
             if self.usgs_tab.inventory is None and self.hidroweb_tab.inventory is None:
                 return self._invalid(

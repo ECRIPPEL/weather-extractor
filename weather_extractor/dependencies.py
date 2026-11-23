@@ -1,8 +1,8 @@
-"""Python libraries of the AORC dataset, installed once with pip into the QGIS profile.
+"""Pinned Python dependencies for Weather Extractor's NOAA AORC data source.
 
 The plugin ZIP holds no compiled files (a rule of the QGIS plugin repository). QGIS
 supplies numpy, pandas, shapely, requests, tzdata, and GDAL. Reading the AORC archive
-also needs the libraries pinned in vendor-requirements.txt (xarray, zarr, numcodecs,
+also needs the packages pinned in requirements.txt (xarray, zarr, numcodecs,
 fsspec, aiohttp, and their helpers), which this module installs on first use. A
 ``vendor/`` folder next to this file (full ZIP, tests) is used instead when present.
 """
@@ -16,9 +16,9 @@ import time
 
 
 PACKAGE_DIR = Path(__file__).resolve().parent
-REQUIREMENTS = PACKAGE_DIR / "vendor-requirements.txt"
+REQUIREMENTS = PACKAGE_DIR / "requirements.txt"
 VENDOR_DIR = PACKAGE_DIR / "vendor"
-# Modules the AORC reader imports; if any is missing, the pinned set is installed.
+# NOAA AORC reader modules; if any is missing, the pinned dependency set is installed.
 AORC_MODULES = ["xarray", "zarr", "numcodecs", "fsspec", "aiohttp", "asciitree"]
 # Published on PyPI only as source; pure Python.
 SOURCE_ONLY = {"asciitree"}
@@ -62,7 +62,7 @@ def python_executable():
     for path in candidates:
         if path.name.lower().startswith("python") and path.is_file():
             return str(path)
-    raise RuntimeError("The Python of QGIS was not found, so the AORC libraries cannot be installed.")
+    raise RuntimeError("The Python of QGIS was not found, so Weather Extractor dependencies cannot be installed.")
 
 
 def pip_commands(target, python=None):
@@ -97,19 +97,22 @@ def _run(command, is_canceled, popen):
 
 
 def install(target=None, progress=None, is_canceled=None, popen=subprocess.Popen):
-    """Install the pinned AORC libraries with pip; returns the folder they went to."""
+    """Install the pinned NOAA AORC dependencies with pip; return their install folder."""
     target = Path(target or library_dir())
     is_canceled = is_canceled or (lambda: False)
     target.mkdir(parents=True, exist_ok=True)
     commands = pip_commands(target)
     for index, command in enumerate(commands):
         if progress:
-            progress(10.0 + 80.0 * index / len(commands), "Installing the AORC libraries with pip (only once)...")
+            progress(
+                10.0 + 80.0 * index / len(commands),
+                "Installing Weather Extractor dependencies for NOAA AORC (only once)...",
+            )
         code, output = _run(command, is_canceled, popen)
         if code:
             tail = "\n".join(output.strip().splitlines()[-8:])
             raise RuntimeError(
-                "pip could not install the AORC libraries. Check the internet connection "
+                "pip could not install Weather Extractor dependencies for NOAA AORC. Check the internet connection "
                 f"(some networks block pypi.org), then press Run again.\n\n{tail}"
             )
     if str(target) not in sys.path:
@@ -119,5 +122,5 @@ def install(target=None, progress=None, is_canceled=None, popen=subprocess.Popen
     if still_missing:
         raise RuntimeError("Installed, but these modules still cannot be loaded: " + ", ".join(still_missing))
     if progress:
-        progress(100.0, "AORC libraries installed.")
+        progress(100.0, "Weather Extractor dependencies for NOAA AORC installed.")
     return target

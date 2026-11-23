@@ -1,10 +1,11 @@
-"""Offline checks of the first-use installer of the AORC libraries (pip is faked)."""
+"""Offline checks of Weather Extractor's NOAA AORC dependency installer (pip is faked)."""
 
 from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from weather_extractor import dependencies
 
@@ -61,7 +62,8 @@ class DependencyTests(unittest.TestCase):
         self.assertNotIn("--only-binary=:all:", sources)
         self.assertEqual([pin for pin in sources if "==" in pin], ["asciitree==0.3.3"])
 
-    def test_install_adds_the_folder_to_the_path(self):
+    @patch("weather_extractor.dependencies.missing", return_value=[])
+    def test_install_adds_the_folder_to_the_path(self, _missing):
         popen = FakePopen()
         messages = []
         folder = dependencies.install(self.target, progress=lambda p, m: messages.append(p), popen=popen)

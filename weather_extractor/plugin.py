@@ -20,7 +20,7 @@ from qgis.core import (
     QgsWkbTypes,
 )
 
-from .aorc_dialog import AORCDialog
+from .dialog import WeatherExtractorDialog
 
 
 # Ask for confirmation above this many stations.
@@ -29,7 +29,7 @@ CELLS_PER_SQUARE_DEGREE = {"aorc": 120 * 120, "era5land": 10 * 10}
 # Name of each gridded dataset in task titles, messages, and layer names.
 GRIDDED_NAMES = {"aorc": "AORC", "era5land": "ERA5-Land"}
 KM_PER_DEGREE = 111.195
-# Supplied by QGIS; the AORC libraries (xarray, zarr...) are installed on first use (dependencies.py).
+# Supplied by QGIS; NOAA AORC support dependencies (xarray, zarr...) are installed on first use.
 GRIDDED_MODULES = ["numpy", "pandas", "shapely", "tzdata", "osgeo"]
 USGS_MODULES = ["numpy", "pandas", "requests", "shapely", "osgeo"]
 ET_MODULES = ["numpy", "pandas", "shapely"]
@@ -40,7 +40,7 @@ TASK_TITLES = {
     "hidroweb_check": "Weather Extractor: check HidroWeb data",
     "hidroweb": "Weather Extractor: HidroWeb data",
     "et": "Weather Extractor: evapotranspiration",
-    "deps": "Weather Extractor: install AORC libraries",
+    "deps": "Weather Extractor: install NOAA AORC dependencies",
 }
 RESULT_TITLES = {"aorc": "Gridded weather", "usgs": "USGS data", "hidroweb": "HidroWeb data", "et": "Evapotranspiration"}
 CHECK_FUNCTIONS = {"usgs": "usgs_inventory", "hidroweb": "hidroweb_inventory"}
@@ -80,7 +80,7 @@ class _BackgroundTask(QgsTask):
         self.finished_callback(self.kind, successful, self.result, self.error)
 
 
-class AORCWeatherPlugin:
+class WeatherExtractorPlugin:
     """QGIS interface for the Weather Extractor tabs."""
 
     MENU_NAME = "&Weather Extractor"
@@ -93,7 +93,7 @@ class AORCWeatherPlugin:
         self.action = None
         self.dialog = None
         self.progress_bridge = None
-        # Settings of the AORC run waiting for its libraries to be installed.
+        # Settings of the NOAA AORC extraction waiting for its dependencies.
         self._pending_extraction = None
 
     def initGui(self):
@@ -120,7 +120,7 @@ class AORCWeatherPlugin:
             self.dialog.raise_()
             self.dialog.activateWindow()
             return
-        dialog = AORCDialog(self.iface, self.iface.mainWindow())
+        dialog = WeatherExtractorDialog(self.iface, self.iface.mainWindow())
         dialog.extractionRequested.connect(self._start_extraction)
         dialog.usgsCheckRequested.connect(lambda settings: self._start_check("usgs", settings))
         dialog.hidrowebCheckRequested.connect(lambda settings: self._start_check("hidroweb", settings))
@@ -221,12 +221,12 @@ class AORCWeatherPlugin:
             dialog.set_running(False)
             dialog.set_progress(0, "Python modules of QGIS could not be loaded.")
             return
-        # AORC needs libraries QGIS lacks; they are installed once, then the run goes on.
+        # NOAA AORC needs packages QGIS lacks; install them once before continuing.
         if settings.get("dataset", "aorc") == "aorc":
             from .dependencies import missing
 
             if missing():
-                self._install_aorc_libraries(settings)
+                self._install_aorc_dependencies(settings)
                 return
         try:
             geometry = self._get_aoi_geometry(settings)
@@ -369,15 +369,16 @@ class AORCWeatherPlugin:
             raise
         self._running_message()
 
-    def _install_aorc_libraries(self, settings):
-        """Ask, then install the AORC libraries in the background; the extraction starts afterwards."""
+    def _install_aorc_dependencies(self, settings):
+        """Ask, then install NOAA AORC data dependencies before extraction."""
         dialog = self.dialog
         answer = QMessageBox.question(
             self.iface.mainWindow(),
-            "Install the AORC libraries",
-            "Reading AORC needs Python libraries that QGIS does not include (xarray, zarr, numcodecs, "
-            "fsspec, aiohttp, about 3 MB). They are installed once with pip from pypi.org into your "
-            "QGIS profile.\n\nInstall them now?",
+            "Install Weather Extractor dependencies",
+            "The NOAA AORC dataset needs additional Python packages that QGIS does not include "
+            "(xarray, zarr, numcodecs, fsspec, aiohttp, about 3 MB). Weather Extractor installs "
+            "these pinned dependencies once with pip from pypi.org into your QGIS profile.\n\n"
+            "Install them now?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.Yes,
         )
@@ -406,13 +407,15 @@ class AORCWeatherPlugin:
             return
         if successful and settings is not None:
             # The dialog is still running: go on with the extraction that asked for the libraries.
-            dialog.set_progress(0, "AORC libraries installed. Starting the extraction...")
+            dialog.set_progress(0, "Weather Extractor dependencies installed. Starting the AORC extraction...")
             self._start_extraction(settings)
             return
         dialog.set_running(False)
         if error is not None and not isinstance(error, InterruptedError):
-            dialog.set_progress(0, "The AORC libraries could not be installed.")
-            QMessageBox.critical(self.iface.mainWindow(), "AORC libraries not installed", f"{error}")
+            dialog.set_progress(0, "Weather Extractor could not install the NOAA AORC dependencies.")
+            QMessageBox.critical(
+                self.iface.mainWindow(), "Weather Extractor dependencies not installed", f"{error}"
+            )
         else:
             dialog.set_progress(0, "Installation canceled.")
 
@@ -664,7 +667,7 @@ class AORCWeatherPlugin:
                 )
             )
             if show:
-                layer = QgsVectorLayer("Polygon", "AORC coordinate AOI", "memory")
+                layer = QgsVectorLayer("Polygon", "Weather Extractor coordinate AOI", "memory")
                 layer.setCrs(crs)
                 feature = QgsFeature(layer.fields())
                 feature.setGeometry(QgsGeometry(rectangle))
@@ -686,7 +689,7 @@ class AORCWeatherPlugin:
             if layer.geometryType() != QgsWkbTypes.PolygonGeometry:
                 raise ValueError("The selected layer must be a polygon layer.")
         else:
-            layer = QgsVectorLayer(settings["shapefile"], "AORC AOI", "ogr")
+            layer = QgsVectorLayer(settings["shapefile"], "Weather Extractor AOI", "ogr")
             if not layer.isValid():
                 raise ValueError("QGIS could not open the AOI file.")
             if layer.geometryType() != QgsWkbTypes.PolygonGeometry:
