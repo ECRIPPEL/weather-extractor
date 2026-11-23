@@ -1,8 +1,8 @@
 # Weather Extractor
 
-**Version 2.4.0**
+**Version 2.4.1**
 
-Weather Extractor is a QGIS plugin that downloads hydroclimatic data for an area of interest: gridded weather (NOAA AORC and ERA5-Land), observed data from USGS, EPA, NOAA and ANA, and evapotranspiration from OpenET and MODIS. Before downloading, each tab checks what exists in the area and period and previews the stations on the map. Outputs are CSV tables, GeoPackage station layers and optional SWAT+ climate files.
+Weather Extractor is a QGIS plugin that downloads hydroclimatic data for an area of interest: gridded weather (NOAA's AORC dataset and ERA5-Land), observed data from USGS, EPA, NOAA and ANA, and evapotranspiration from OpenET and MODIS. Here, AORC refers to the NOAA dataset; the plugin is named Weather Extractor. Before downloading, each tab checks what exists in the area and period and previews the stations on the map. Outputs are CSV tables, GeoPackage station layers and optional SWAT+ climate files.
 
 ![Overview](docs/images/overview.png)
 
@@ -54,9 +54,13 @@ Each tab writes to the output folder: gridded station series (`<station>_daily.c
 
 ## Installation
 
-In QGIS, open *Plugins > Manage and Install Plugins*, search for **Weather Extractor** and install it. You can also download `Weather_Extractor-2.4.0.zip` from [Releases](https://github.com/ECRIPPEL/weather-extractor/releases) and use *Install from ZIP*.
+In QGIS, open *Plugins > Manage and Install Plugins*, search for **Weather Extractor** and install it. You can also download `Weather_Extractor-2.4.1.zip` from [Releases](https://github.com/ECRIPPEL/weather-extractor/releases) and use *Install from ZIP*.
 
-The first time you choose AORC, the plugin installs its Python libraries (xarray, zarr and others, about 3 MB) with pip into your QGIS profile; this takes about a minute and happens once. ERA5-Land and the Remote Sensing tab need the [Google Earth Engine plugin](https://plugins.qgis.org/plugins/ee_plugin/) and a Cloud project [registered for Earth Engine](https://code.earthengine.google.com/register). If a step is missing, *Run* lists it.
+The first time you choose NOAA AORC, Weather Extractor installs its pinned dataset dependencies (xarray, zarr and helpers) with pip into your QGIS profile; this takes about a minute and happens once, and requires internet access to PyPI. NumPy, pandas, Shapely, requests, tzdata, and GDAL are provided by QGIS to keep the plugin small and compatible with QGIS's Python environment. QGIS, PyQt, and GDAL bindings therefore remain host requirements.
+
+If the QGIS computer will be offline, download the `-win-full.zip` release while online and install it with *Install from ZIP*. It includes the pinned dependencies needed to use NOAA AORC on Windows x64 and Python 3.12, so Weather Extractor can use the dataset without downloading packages at first run. The regular plugin ZIP is smaller and downloads those dependencies from PyPI on first AORC use.
+
+ERA5-Land and the Remote Sensing tab need the [Google Earth Engine plugin](https://plugins.qgis.org/plugins/ee_plugin/) and a Cloud project [registered for Earth Engine](https://code.earthengine.google.com/register). If a step is missing, *Run* lists it.
 
 ## Compatibility
 
@@ -68,7 +72,7 @@ The first time you choose AORC, the plugin installs its Python libraries (xarray
 
 If you use Weather Extractor, please cite:
 
-> Weather Extractor contributors (2026). *Weather Extractor* (version 2.4.0) [QGIS plugin]. https://github.com/ECRIPPEL/weather-extractor
+> Weather Extractor contributors (2026). *Weather Extractor* (version 2.4.1) [QGIS plugin]. https://github.com/ECRIPPEL/weather-extractor
 
 Please also cite the data you download:
 
@@ -86,7 +90,7 @@ ERA5-Land outputs must state "Generated using Copernicus Climate Change Service 
 
 ## Build
 
-From the repository root, `python scripts/build_zip.py` writes `dist/Weather_Extractor-<version>.zip`, without compiled files, as the QGIS plugin repository requires. `--vendor` downloads the AORC libraries into `weather_extractor/vendor/` (not kept in git), which the tests use, and `--full` also writes a ZIP that bundles them, for computers that cannot reach pypi.org. Offline tests:
+From the repository root, `python scripts/build_zip.py` writes `dist/Weather_Extractor-<version>.zip`, without compiled files, as the QGIS plugin repository requires. `weather_extractor/requirements.txt` is the single pinned list used by both the first-use installer and the vendor builder. `--vendor` downloads Weather Extractor's NOAA AORC dependencies into `weather_extractor/vendor/` (not kept in git), which the tests use, and `--full` also writes a Windows x64/Python 3.12 ZIP that bundles them for offline installation. Offline tests:
 
 ```powershell
 & 'C:\Program Files\QGIS 3.40.x\bin\python-qgis-ltr.bat' -m unittest discover -s tests -t . -v
