@@ -137,8 +137,6 @@ def crs_definition(crs):
 
 class WeatherExtractorDialog(QDialog):
     extractionRequested = pyqtSignal(object)
-    gridPreviewRequested = pyqtSignal(object)
-    gridPreviewInvalidated = pyqtSignal()
     usgsCheckRequested = pyqtSignal(object)
     hidrowebCheckRequested = pyqtSignal(object)
     cancelRequested = pyqtSignal()
@@ -246,19 +244,6 @@ class WeatherExtractorDialog(QDialog):
         for _, widget in self.source_pages.values():
             self.source_stack.addWidget(widget)
 
-        self.subbasin_filter = QCheckBox("Use only polygons selected on the map")
-        self.subbasin_filter.setToolTip(
-            "Select one or more watershed/sub-basin polygons in QGIS, then enable this option. "
-            "When unchecked, all polygon features define the area."
-        )
-        self.subbasin_status = QLabel("All polygon features are included.")
-        self.subbasin_status.setWordWrap(True)
-        subbasin_widget = QWidget()
-        subbasin_layout = QVBoxLayout(subbasin_widget)
-        subbasin_layout.setContentsMargins(0, 0, 0, 0)
-        subbasin_layout.addWidget(self.subbasin_filter)
-        subbasin_layout.addWidget(self.subbasin_status)
-
         self.dem_path = QLineEdit()
         self.dem_path.setPlaceholderText("Optional: raster used to sample station elevation")
         self.dem_button = QPushButton("Browse...")
@@ -271,7 +256,6 @@ class WeatherExtractorDialog(QDialog):
 
         aoi_form.addRow("Input layer", self.aoi_source)
         aoi_form.addRow(self.source_label, self.source_stack)
-        aoi_form.addRow("Sub-basins", subbasin_widget)
         aoi_form.addRow(
             "Elevation raster (optional)", self._row_widget(self.dem_path, self.dem_button)
         )
@@ -445,24 +429,9 @@ class WeatherExtractorDialog(QDialog):
         }
 
         # Each data tab has its own Run button; it turns into Cancel while that tab runs.
-        self.grid_preview_button = QPushButton("Preview availability")
-        self.grid_preview_button.setToolTip(
-            "Show the extraction locations and selected date and variable coverage without downloading weather data"
-        )
-        self.grid_preview_button.clicked.connect(self._preview_clicked)
-        self.grid_preview_status = QLabel(
-            "Preview the selected grid locations and data coverage; this does not start a download."
-        )
-        self.grid_preview_status.setWordWrap(True)
-        period_form.addRow("Availability preview", self.grid_preview_status)
         self.aorc_run = QPushButton("Run")
         self.aorc_run.setToolTip("Extract gridded weather for the area of tab 1")
         self.aorc_run.clicked.connect(lambda: self._run_clicked("aorc"))
-        grid_footer = QWidget()
-        grid_footer_row = QHBoxLayout(grid_footer)
-        grid_footer_row.addWidget(self.grid_preview_button)
-        grid_footer_row.addStretch(1)
-        grid_footer_row.addWidget(self.aorc_run)
         self.et_tab = EtTab()
         self.et_tab.run_button.clicked.connect(lambda: self._run_clicked("et"))
         self.run_buttons = {
@@ -476,7 +445,7 @@ class WeatherExtractorDialog(QDialog):
         self.tabs = QTabWidget()
         self.tabs.addTab(self._tab_page(aoi_group, output_group), TAB_TITLES[TAB_AREA])
         self.tabs.addTab(
-            self._tab_page(period_group, aorc_output_group, footer=grid_footer), TAB_TITLES[TAB_GRIDDED]
+            self._tab_page(period_group, aorc_output_group, footer=self.aorc_run), TAB_TITLES[TAB_GRIDDED]
         )
         self.tabs.addTab(self.usgs_tab, TAB_TITLES[TAB_USGS])
         self.tabs.addTab(self.hidroweb_tab, TAB_TITLES[TAB_HIDROWEB])
@@ -512,14 +481,8 @@ class WeatherExtractorDialog(QDialog):
         self._clock.timeout.connect(lambda: self._show_progress(*self._progress))
         self._running = False
         self._running_kind = None
-        self._previewing = False
-        self._subbasin_layer = None
         self._started = time.monotonic()
         self.aoi_source.currentIndexChanged.connect(self._update_source_widgets)
-        self.aoi_source.currentIndexChanged.connect(self._update_subbasin_layer)
-        self.layer_combo.currentIndexChanged.connect(self._update_subbasin_layer)
-        self.shapefile_edit.textChanged.connect(self._update_subbasin_layer)
-        self.subbasin_filter.toggled.connect(self._subbasin_filter_changed)
         self.grid_mode.currentIndexChanged.connect(self._update_grid_widgets)
         self.dataset.currentIndexChanged.connect(self._update_dataset_widgets)
         # A new area makes the last availability checks obsolete.
@@ -530,28 +493,7 @@ class WeatherExtractorDialog(QDialog):
             self.bounds_crs.crsChanged.connect(tab.invalidate)
             for field in (self.west_lon, self.south_lat, self.east_lon, self.north_lat):
                 field.valueChanged.connect(tab.invalidate)
-        for signal in (
-            self.aoi_source.currentIndexChanged,
-            self.layer_combo.currentIndexChanged,
-            self.shapefile_edit.textChanged,
-            self.bounds_crs.crsChanged,
-            self.west_lon.valueChanged,
-            self.south_lat.valueChanged,
-            self.east_lon.valueChanged,
-            self.north_lat.valueChanged,
-            self.dataset.currentIndexChanged,
-            self.start_year.valueChanged,
-            self.end_year.valueChanged,
-            self.grid_mode.currentIndexChanged,
-            self.block_km.valueChanged,
-            self.daily_step.toggled,
-            self.hourly_step.toggled,
-        ):
-            signal.connect(self._invalidate_grid_preview)
-        for check in self.variable_checks.values():
-            check.toggled.connect(self._invalidate_grid_preview)
         self._update_source_widgets()
-        self._update_subbasin_layer()
         self._update_dataset_widgets()
         self._update_run_buttons()
 
@@ -584,11 +526,7 @@ class WeatherExtractorDialog(QDialog):
         return container
 
     def _update_run_buttons(self):
-        idle = (
-            not self._running
-            and not self._previewing
-            and not any(tab._checking for tab, _, _ in self.observed_tabs.values())
-        )
+        idle = not self._running and not any(tab._checking for tab, _, _ in self.observed_tabs.values())
         ready = {"aorc": idle, "et": idle}
         for kind, (tab, _, _) in self.observed_tabs.items():
             ready[kind] = idle and tab.can_run()
@@ -596,48 +534,6 @@ class WeatherExtractorDialog(QDialog):
             running_here = self._running_kind == kind
             button.setText("Cancel" if running_here else "Run")
             button.setEnabled(running_here or ready[kind])
-        self.grid_preview_button.setText("Cancel preview" if self._previewing else "Preview availability")
-        self.grid_preview_button.setEnabled(self._previewing or idle)
-
-    def _invalidate_grid_preview(self, *_):
-        self.grid_preview_status.setText("Settings changed. Preview availability again to refresh the map.")
-        self.gridPreviewInvalidated.emit()
-
-    def _preview_clicked(self):
-        if self._previewing:
-            self.cancelRequested.emit()
-            self.grid_preview_status.setText("Canceling preview...")
-            return
-        if not self.validate_area(require_output=False):
-            return
-        settings = self.get_settings()
-        if settings["start_year"] > settings["end_year"]:
-            self._invalid(TAB_GRIDDED, "Invalid year range", "The start year must be on or before the end year.")
-            return
-        if not settings["variables"]:
-            self._invalid(TAB_GRIDDED, "No climate variables", "Select at least one climate variable.")
-            return
-        if settings["grid_mode"] == "gauges" and not settings["gauges"]:
-            self._invalid(
-                TAB_USGS,
-                "No rain gauges selected",
-                "Check available data in tab 3 or 4 and select precipitation stations before previewing.",
-            )
-            return
-        if settings["dataset"] == "era5land" and not self.et_tab.confirm_setup("ERA5-Land preview"):
-            return
-        self.gridPreviewRequested.emit(settings)
-
-    def set_grid_previewing(self, previewing):
-        self._previewing = previewing
-        for group in self._input_groups:
-            group.setEnabled(not previewing and not self._running)
-        self.usgs_tab.set_running(previewing or self._running)
-        self.hidroweb_tab.set_running(previewing or self._running)
-        self.et_tab.set_running(previewing or self._running)
-        self._update_run_buttons()
-        if previewing:
-            self.grid_preview_status.setText("Building the station map and checking dataset coverage metadata...")
 
     def _check_clicked(self, kind):
         tab, index, signal = self.observed_tabs[kind]
@@ -819,70 +715,6 @@ class WeatherExtractorDialog(QDialog):
         self.source_stack.setCurrentWidget(current)
         self.source_stack.adjustSize()
 
-    def _selection_layer(self):
-        source = self.aoi_source.currentData()
-        if source == "selected_layer":
-            layer_id = self.layer_combo.currentData()
-            return QgsProject.instance().mapLayer(layer_id) if layer_id else None
-        if source == "shapefile" and self._loaded_file is not None:
-            path, layer_id = self._loaded_file
-            if path == self.shapefile_edit.text().strip():
-                return QgsProject.instance().mapLayer(layer_id)
-        return None
-
-    def _update_subbasin_layer(self, *_):
-        layer = self._selection_layer()
-        if layer is self._subbasin_layer:
-            self._update_subbasin_status()
-            return
-        if self._subbasin_layer is not None:
-            try:
-                self._subbasin_layer.selectionChanged.disconnect(self._subbasin_selection_changed)
-            except (TypeError, RuntimeError):
-                pass
-        self._subbasin_layer = layer
-        selectable = (
-            layer is not None
-            and layer.isValid()
-            and layer.geometryType() == QgsWkbTypes.PolygonGeometry
-        )
-        self.subbasin_filter.setEnabled(selectable)
-        if selectable:
-            layer.selectionChanged.connect(self._subbasin_selection_changed)
-        elif self.subbasin_filter.isChecked():
-            self.subbasin_filter.blockSignals(True)
-            self.subbasin_filter.setChecked(False)
-            self.subbasin_filter.blockSignals(False)
-        self._update_subbasin_status()
-
-    def _update_subbasin_status(self):
-        if not self.subbasin_filter.isChecked():
-            self.subbasin_status.setText("All polygon features are included.")
-        elif self._subbasin_layer is None:
-            self.subbasin_status.setText("Load a polygon layer to select sub-basins.")
-        else:
-            try:
-                count = len(self._subbasin_layer.selectedFeatureIds())
-            except RuntimeError:
-                self._update_subbasin_layer()
-                return
-            self.subbasin_status.setText(
-                f"Using {count:,} selected polygon(s)." if count else "Select one or more polygons on the map."
-            )
-
-    def _subbasin_selection_changed(self, *_):
-        self._update_subbasin_status()
-        if self.subbasin_filter.isChecked():
-            for tab in (self.usgs_tab, self.hidroweb_tab):
-                tab.invalidate()
-            self._invalidate_grid_preview()
-
-    def _subbasin_filter_changed(self, _checked):
-        self._update_subbasin_status()
-        for tab in (self.usgs_tab, self.hidroweb_tab):
-            tab.invalidate()
-        self._invalidate_grid_preview()
-
     def _update_grid_widgets(self):
         mode, size = self.grid_mode.currentData()
         self.block_km.setVisible(mode == "block" and size is None)
@@ -936,10 +768,6 @@ class WeatherExtractorDialog(QDialog):
         source = self.aoi_source.currentData()
         layer_id = self.layer_combo.currentData()
         path = self.shapefile_edit.text().strip()
-        selected_subbasins = None
-        if self.subbasin_filter.isChecked():
-            layer = self._selection_layer()
-            selected_subbasins = sorted(layer.selectedFeatureIds()) if layer is not None else []
         if (
             source == "shapefile"
             and self._loaded_file is not None
@@ -959,7 +787,6 @@ class WeatherExtractorDialog(QDialog):
                 "north": self.north_lat.value(),
             },
             "bounds_crs": crs_definition(self.bounds_crs.crs()),
-            "subbasin_feature_ids": selected_subbasins,
             "dem_path": self.dem_path.text().strip(),
             "dataset": dataset,
             "start_year": self.start_year.value(),
@@ -996,7 +823,7 @@ class WeatherExtractorDialog(QDialog):
     def validate(self):
         return self.validate_area() and self.validate_aorc()
 
-    def validate_area(self, require_output=True):
+    def validate_area(self):
         """Checks for tab 1, which every data source needs."""
         settings = self.get_settings()
         if settings["source"] == "selected_layer":
@@ -1017,15 +844,6 @@ class WeatherExtractorDialog(QDialog):
             bounds = settings["bounds"]
             if bounds["west"] >= bounds["east"] or bounds["south"] >= bounds["north"]:
                 return self._invalid(TAB_AREA, "Invalid bounds", "Minimum X/Y must be less than maximum X/Y.")
-        if settings["subbasin_feature_ids"] is not None:
-            if not settings["subbasin_feature_ids"]:
-                return self._invalid(
-                    TAB_AREA,
-                    "No sub-basins selected",
-                    "Select one or more polygon features on the map, or clear 'Use only polygons selected on the map'.",
-                )
-        if not require_output:
-            return True
         if settings["dem_path"] and not Path(settings["dem_path"]).is_file():
             return self._invalid(TAB_AREA, "DEM not found", "The selected elevation raster does not exist.")
         if not settings["output_dir"]:
